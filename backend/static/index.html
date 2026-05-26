@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduBot — AI Academic Mentor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #070913;
+      --surface: #0f1122;
+      --card: #15182e;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-hover: rgba(255, 255, 255, 0.16);
+      --accent1: #6366f1; /* Indigo */
+      --accent2: #8b5cf6; /* Violet */
+      --accent3: #06b6d4; /* Cyan */
+      --text: #f8fafc;
+      --muted: #64748b;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --error: #ef4444;
+      --font-title: 'Plus Jakarta Sans', sans-serif;
+      --font-body: 'Outfit', sans-serif;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ──────────────────────────────── */
+    header {
+      padding: 16px 32px;
+      background: rgba(15, 17, 34, 0.8);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .logo {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, var(--accent1), var(--accent2));
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+    }
+    header h1 {
+      font-family: var(--font-title);
+      font-size: 20px; font-weight: 700; letter-spacing: -0.5px;
+    }
+    .header-tag {
+      background: rgba(99, 102, 241, 0.1);
+      color: #a5b4fc;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(99, 102, 241, 0.2);
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .status-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.03);
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted);
+      position: relative;
+    }
+    .status-dot.ready {
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success);
+      animation: pulse-green 2s infinite;
+    }
+    .status-dot.fallback {
+      background: var(--warning);
+      box-shadow: 0 0 10px var(--warning);
+      animation: pulse-orange 2s infinite;
+    }
+    @keyframes pulse-green {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    @keyframes pulse-orange {
+      0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    }
+
+    .clear-btn {
+      background: transparent;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      font-family: var(--font-body);
+      font-size: 13px; font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: all 0.2s;
+    }
+    .clear-btn:hover {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: var(--error);
+      color: var(--text);
+    }
+
+    /* ── Layout ──────────────────────────────── */
+    .container {
+      flex: 1;
+      display: flex;
+      max-width: 1440px;
+      margin: 0 auto;
+      width: 100%;
+      height: calc(100vh - 75px);
+    }
+
+    /* ── Sidebar ─────────────────────────────── */
+    .sidebar {
+      width: 300px;
+      flex-shrink: 0;
+      padding: 24px;
+      border-right: 1px solid var(--border);
+      background: rgba(15, 17, 34, 0.4);
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .sidebar-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .sidebar-title {
+      font-family: var(--font-title);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #818cf8;
+    }
+    .sidebar-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      line-height: 1.5;
+      font-size: 13px;
+    }
+    .sidebar-card strong {
+      color: #c084fc;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .topic-badge {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      background: rgba(6, 182, 212, 0.1);
+      color: #67e8f9;
+      border: 1px solid rgba(6, 182, 212, 0.2);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .sidebar-nav-btn {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 13px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .sidebar-nav-btn:hover {
+      background: rgba(99, 102, 241, 0.08);
+      border-color: var(--accent1);
+      transform: translateX(4px);
+    }
+    .sidebar-footer {
+      margin-top: auto;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    /* ── Chat Area ───────────────────────────── */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: rgba(7, 9, 19, 0.3);
+      position: relative;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      scroll-behavior: smooth;
+    }
+
+    /* Custom Scrollbar */
+    #messages::-webkit-scrollbar { width: 6px; }
+    #messages::-webkit-scrollbar-track { background: transparent; }
+    #messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.05); border-radius: 999px; }
+    #messages::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.1); }
+
+    /* ── Welcome Screen ──────────────────────── */
+    .welcome {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 20px;
+      max-width: 580px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .welcome-icon {
+      width: 80px; height: 80px;
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.1));
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      border-radius: 28px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 40px;
+      box-shadow: 0 10px 30px rgba(99, 102, 241, 0.05);
+      animation: float 4s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+    .welcome h2 {
+      font-family: var(--font-title);
+      font-size: 26px; font-weight: 700;
+      background: linear-gradient(to right, #fff, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .welcome p {
+      font-size: 14px; color: var(--muted);
+      line-height: 1.7;
+    }
+    .welcome-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .welcome-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .welcome-card:hover {
+      border-color: var(--accent1);
+      background: rgba(99, 102, 241, 0.04);
+      transform: translateY(-2px);
+    }
+    .welcome-card h4 {
+      font-family: var(--font-title);
+      font-size: 13px; font-weight: 600; color: #818cf8;
+      margin-bottom: 4px;
+    }
+    .welcome-card p {
+      font-size: 12px; color: var(--muted);
+      line-height: 1.4;
+    }
+
+    /* ── Message Bubbles ─────────────────────── */
+    .message-row {
+      display: flex;
+      gap: 16px;
+      width: 100%;
+      max-width: 820px;
+      animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes slide-up {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-row.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+    .message-row.bot {
+      align-self: flex-start;
+    }
+
+    .avatar {
+      width: 38px; height: 38px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .message-row.user .avatar {
+      background: linear-gradient(135deg, var(--accent1), var(--accent2));
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+    }
+    .message-row.bot .avatar {
+      background: linear-gradient(135deg, #1e2030, #131526);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .bubble-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: calc(100% - 54px);
+    }
+    .message-row.user .bubble-wrapper { align-items: flex-end; }
+    .message-row.bot .bubble-wrapper { align-items: flex-start; }
+
+    .bubble {
+      padding: 16px 20px;
+      border-radius: 16px;
+      font-size: 14.5px;
+      line-height: 1.65;
+    }
+    .message-row.user .bubble {
+      background: linear-gradient(135deg, var(--accent1), #5b21b6);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      box-shadow: 0 4px 15px rgba(99, 102, 241, 0.1);
+    }
+    .message-row.bot .bubble {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: #e2e8f0;
+      border-bottom-left-radius: 4px;
+    }
+
+    .timestamp {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 0 4px;
+    }
+
+    /* ── Suggested Questions Pills ───────────── */
+    .suggestions-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      width: 100%;
+      max-width: 760px;
+      align-self: flex-start;
+      margin-left: 54px; /* Align with bubbles, past avatar */
+      animation: fade-in 0.5s ease-out;
+    }
+    @keyframes fade-in {
+      from { opacity: 0; } to { opacity: 1; }
+    }
+    .suggestion-pill {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      color: #a5b4fc;
+      font-family: var(--font-body);
+      font-size: 12.5px;
+      padding: 8px 14px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+    }
+    .suggestion-pill:hover {
+      background: rgba(99, 102, 241, 0.08);
+      border-color: var(--accent1);
+      color: #c7d2fe;
+      transform: translateY(-1px);
+    }
+
+    /* ── Typing Indicator ────────────────────── */
+    .typing-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+    }
+    .typing-label {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .typing-dots {
+      display: flex; gap: 4px; align-items: center;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--muted);
+      animation: bounce 1s infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.15s; }
+    .dot:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40% { transform: translateY(-5px); background: var(--accent2); }
+    }
+
+    /* ── Input Bar ───────────────────────────── */
+    .input-bar {
+      padding: 24px 32px;
+      border-top: 1px solid var(--border);
+      background: rgba(15, 17, 34, 0.6);
+      backdrop-filter: blur(16px);
+    }
+    .input-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 12px 18px;
+      max-width: 820px;
+      margin: 0 auto;
+      transition: all 0.2s;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    }
+    .input-wrap:focus-within {
+      border-color: rgba(99, 102, 241, 0.6);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+    #question-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14.5px;
+      resize: none;
+      max-height: 140px;
+      line-height: 1.5;
+      padding-top: 6px;
+    }
+    #question-input::placeholder { color: var(--muted); }
+    
+    .action-btn {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    #send-btn {
+      background: linear-gradient(135deg, var(--accent1), var(--accent2));
+      color: #fff;
+      box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
+    }
+    #send-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    #send-btn:active { transform: translateY(0); }
+    #send-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
+    
+    .input-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    /* ── Render List Styles in Chat ──────────── */
+    .chat-list {
+      margin: 8px 0 8px 20px;
+      padding-left: 0;
+    }
+    .chat-list li {
+      margin-bottom: 4px;
+    }
+
+    /* ── Recommendation Cards ────────────────── */
+    .recommendations-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 12px;
+      width: 100%;
+      max-width: 760px;
+      align-self: flex-start;
+      margin-left: 54px;
+      animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .recommendation-card {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(6, 182, 212, 0.04));
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 14px;
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .recommendation-card:hover {
+      border-color: rgba(99, 102, 241, 0.4);
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(6, 182, 212, 0.08));
+      transform: translateY(-1px);
+    }
+    .rec-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .rec-badge {
+      background: rgba(6, 182, 212, 0.15);
+      color: #67e8f9;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border: 1px solid rgba(6, 182, 212, 0.2);
+    }
+    .rec-title {
+      font-family: var(--font-title);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .rec-desc {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .rec-btn {
+      align-self: flex-start;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--accent3);
+      font-family: var(--font-body);
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 4px;
+    }
+    .rec-btn:hover {
+      background: var(--accent3);
+      color: #070913;
+      border-color: var(--accent3);
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.3);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="header-left">
+      <div class="logo">🎓</div>
+      <div>
+        <h1>EduBot</h1>
+      </div>
+      <span class="header-tag">AI Academic Mentor</span>
+    </div>
+    <div class="header-right">
+      <div class="status-container" id="status-container" title="Checking AI Server status...">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Connecting...</span>
+      </div>
+      <button class="clear-btn" onclick="clearConversation()">
+        🔄 Clear Chat
+      </button>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <p class="sidebar-title">🧠 Academic Mentor</p>
+        <div class="sidebar-card">
+          <strong>EduBot Active Session</strong>
+          Answering syllabus, certifications, LMS help, courses, and engineering placement guidelines.
+          <div id="topic-badge-container">
+            <span class="topic-badge">General Chat</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Academic Profile Memory Widget -->
+      <div class="sidebar-section" id="academic-profile-section">
+        <p class="sidebar-title">🎓 Academic Profile</p>
+        <div class="sidebar-card" style="border-color: rgba(99, 102, 241, 0.25); background: rgba(99, 102, 241, 0.03);">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div>
+              <span style="font-size:10px; text-transform:uppercase; color:var(--muted); font-weight:700; letter-spacing:0.5px;">Active Goal</span>
+              <strong id="profile-goal" style="color:var(--accent3); font-size:12px; margin-top:2px; display:block;">Gathering goals...</strong>
+            </div>
+            <div style="border-top:1px solid rgba(255,255,255,0.05); padding-top:6px;">
+              <span style="font-size:10px; text-transform:uppercase; color:var(--muted); font-weight:700; letter-spacing:0.5px;">Target Domain</span>
+              <strong id="profile-domain" style="color:#c084fc; font-size:12px; margin-top:2px; display:block;">Analyzing interests...</strong>
+            </div>
+            <div style="border-top:1px solid rgba(255,255,255,0.05); padding-top:6px;">
+              <span style="font-size:10px; text-transform:uppercase; color:var(--muted); font-weight:700; letter-spacing:0.5px;">Weak Subjects</span>
+              <strong id="profile-subject" style="color:#fca5a5; font-size:12px; margin-top:2px; display:block;">None detected</strong>
+            </div>
+            <div style="border-top:1px solid rgba(255,255,255,0.05); padding-top:6px;">
+              <span style="font-size:10px; text-transform:uppercase; color:var(--muted); font-weight:700; letter-spacing:0.5px;">Mentor Mode</span>
+              <span id="profile-mode" class="topic-badge" style="margin-top:4px; display:inline-block; font-size:9.5px;">Academic Mentor</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="sidebar-section">
+        <p class="sidebar-title">⚡ Interactive Guidance</p>
+        <button class="sidebar-nav-btn" onclick="triggerPill('Tell me about the placement preparation roadmap')">
+          💼 Placements Prep
+        </button>
+        <button class="sidebar-nav-btn" onclick="triggerPill('What courses are currently offered by Edutainer?')">
+          💻 Course Syllabus
+        </button>
+        <button class="sidebar-nav-btn" onclick="triggerPill('How do I download my VTU certificate?')">
+          📜 VTU Certifications
+        </button>
+        <button class="sidebar-nav-btn" onclick="triggerPill('How can I contact the academic support team?')">
+          🔧 Portal LMS Support
+        </button>
+      </div>
+
+      <div class="sidebar-footer">
+        Powered by ChromaDB + LlamaIndex<br>
+        Local LLM Condense Context Memory
+      </div>
+    </aside>
+
+    <!-- Chat Area -->
+    <section class="chat-area">
+      <div id="messages">
+        <!-- Messages get injected here -->
+      </div>
+
+      <!-- Input Section -->
+      <div class="input-bar">
+        <div class="input-wrap">
+          <textarea id="question-input" rows="1" placeholder="Ask your academic mentor anything…"></textarea>
+          <button id="send-btn" class="action-btn" onclick="sendQuestion()" title="Send Message" disabled>➤</button>
+        </div>
+        <p class="input-hint">Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</p>
+      </div>
+    </section>
+  </div>
+
+<script>
+  const inputEl = document.getElementById('question-input');
+  const sendBtn = document.getElementById('send-btn');
+  const msgsContainer = document.getElementById('messages');
+  const statusDot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+  const statusContainer = document.getElementById('status-container');
+  const topicContainer = document.getElementById('topic-badge-container');
+
+  // Set up or load session ID
+  let sessionId = localStorage.getItem('edubot_session_id');
+  if (!sessionId) {
+    sessionId = 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    localStorage.setItem('edubot_session_id', sessionId);
+  }
+
+  // Load persistent chat history from localStorage
+  let chatHistory = [];
+  try {
+    const savedHistory = localStorage.getItem('edubot_chat_history');
+    if (savedHistory) {
+      chatHistory = JSON.parse(savedHistory);
+    }
+  } catch (e) {
+    console.error("Failed to load chat history:", e);
+  }
+
+  // Auto-resize textarea
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+  });
+
+  // Enable/disable send button based on text content
+  inputEl.addEventListener('input', () => {
+    sendBtn.disabled = inputEl.value.trim().length === 0;
+  });
+
+  // Key event listeners
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendQuestion();
+    }
+  });
+
+  // Dynamic Suggestion Questions based on active topic
+  const SUGGESTED_QUESTIONS = {
+    general: [
+      "🎓 What courses does Edutainer offer?",
+      "💼 Can you help me prepare for placements?",
+      "📜 Tell me about the VTU certificate stamp.",
+      "📞 How do I contact help support?"
+    ],
+    placements: [
+      "💼 What is the placement preparation roadmap?",
+      "📝 What are the best resume tips for engineering placements?",
+      "🤝 Tell me about internship requirements."
+    ],
+    courses: [
+      "💻 What is the React JS course syllabus?",
+      "🎓 Can you list all engineering courses available?",
+      "⏱️ What is the duration of the Python training?"
+    ],
+    certifications: [
+      "📜 How do I download my VTU certificate?",
+      "🛡️ Are course certificates globally recognized?",
+      "✍️ What assignments are needed for verification?"
+    ],
+    support: [
+      "🔧 How do I contact the LMS technical support?",
+      "🔑 I am having trouble with logging in.",
+      "📬 Who do I mail for academic queries?"
+    ]
+  };
+
+  // Run initial setup on load
+  window.addEventListener('DOMContentLoaded', () => {
+    checkHealth();
+    renderChat();
+    // Poll health check every 10 seconds to keep track of Ollama status
+    setInterval(checkHealth, 10000);
+  });
+
+  // Health and Status Check
+  async function checkHealth() {
+    try {
+      const res = await fetch('/health');
+      const data = await res.json();
+      if (data.ollama_online) {
+        statusDot.className = 'status-dot ready';
+        statusText.textContent = 'LLM Active (Mistral)';
+        statusContainer.title = `${data.chunks_indexed} database chunks indexed. Conversational local LLM running.`;
+      } else {
+        statusDot.className = 'status-dot fallback';
+        statusText.textContent = 'Fallback Active';
+        statusContainer.title = `${data.chunks_indexed} database chunks indexed. Local Ollama server is offline (running in Fallback Mode).`;
+      }
+    } catch (err) {
+      statusDot.className = 'status-dot';
+      statusText.textContent = 'Offline';
+      statusContainer.title = 'Cannot connect to the backend server.';
+    }
+  }
+
+  // Format response helper: parses newlines, bold marks, lists securely
+  function formatMessageContent(text) {
+    let html = text;
+    
+    // Escape HTML tags to prevent XSS
+    html = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    
+    // Format bold text (**text** or __text__)
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+    
+    // Format bullet lists (* item or - item)
+    const lines = html.split('\n');
+    let inList = false;
+    let processedLines = [];
+    
+    for (let line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+        if (!inList) {
+          processedLines.push('<ul class="chat-list">');
+          inList = true;
+        }
+        processedLines.push('<li>' + trimmed.substring(2) + '</li>');
+      } else {
+        if (inList) {
+          processedLines.push('</ul>');
+          inList = false;
+        }
+        processedLines.push(line);
+      }
+    }
+    if (inList) {
+      processedLines.push('</ul>');
+    }
+    
+    html = processedLines.join('\n');
+    
+    // Replace newlines with <br>
+    html = html.replace(/\n/g, '<br>');
+    
+    return html;
+  }
+
+  // Render chat window based on loaded history
+  function renderChat() {
+    msgsContainer.innerHTML = '';
+    
+    if (chatHistory.length === 0) {
+      // Welcome State
+      const welcomeDiv = document.createElement('div');
+      welcomeDiv.className = 'welcome';
+      welcomeDiv.id = 'welcome-screen';
+      welcomeDiv.innerHTML = `
+        <div class="welcome-icon">🤖</div>
+        <h2>Meet EduBot, your AI Academic Mentor</h2>
+        <p>I am here to guide you through Edutainer's LMS portal. Ask me about course syllabi, engineering placements prep, internship opportunities, support tickets, and VTU certificates.</p>
+        <div class="welcome-grid">
+          <div class="welcome-card" onclick="triggerPill('What courses does Edutainer offer?')">
+            <h4>💻 Browse Courses</h4>
+            <p>React JS, Python, Java, Core Engineering & more.</p>
+          </div>
+          <div class="welcome-card" onclick="triggerPill('What is the placement preparation roadmap?')">
+            <h4>💼 Placements Prep</h4>
+            <p>Roadmaps, resume mentoring, internships.</p>
+          </div>
+          <div class="welcome-card" onclick="triggerPill('How do I download my VTU certificate?')">
+            <h4>📜 VTU Certificate</h4>
+            <p>Stamp verification, portal downloads.</p>
+          </div>
+          <div class="welcome-card" onclick="triggerPill('How do I contact Edutainer support?')">
+            <h4>🔧 Contact Support</h4>
+            <p>LMS login issues, support queries.</p>
+          </div>
+        </div>
+      `;
+      msgsContainer.appendChild(welcomeDiv);
+      topicContainer.innerHTML = `<span class="topic-badge">General Chat</span>`;
+      return;
+    }
+
+    // Render historical messages
+    chatHistory.forEach((msg, idx) => {
+      appendBubbleUI(msg.role, msg.text, msg.time);
+      
+      // If it is the last message and it's a bot message, render follow-up suggestions
+      if (idx === chatHistory.length - 1 && msg.role === 'bot') {
+        renderSuggestionPills(msg.topic || 'general');
+        updateTopicBadge(msg.topic || 'general');
+      }
+    });
+
+    msgsContainer.scrollTop = msgsContainer.scrollHeight;
+  }
+
+  // Basic bubble generation UI injector
+  function appendBubbleUI(role, text, timeStr) {
+    const row = document.createElement('div');
+    row.className = `message-row ${role}`;
+    
+    const emoji = role === 'user' ? '👤' : '🤖';
+    const bubbleHTML = formatMessageContent(text);
+    
+    row.innerHTML = `
+      <div class="avatar">${emoji}</div>
+      <div class="bubble-wrapper">
+        <div class="bubble">
+          <div class="bubble-content">${bubbleHTML}</div>
+        </div>
+        <span class="timestamp">${timeStr}</span>
+      </div>
+    `;
+    
+    msgsContainer.appendChild(row);
+    return row;
+  }
+
+  // Display the typing animation
+  function showTypingIndicator() {
+    const row = document.createElement('div');
+    row.id = 'typing-indicator';
+    row.className = 'message-row bot';
+    row.innerHTML = `
+      <div class="avatar">🤖</div>
+      <div class="bubble-wrapper">
+        <div class="bubble" style="padding: 12px 18px;">
+          <div class="typing-container">
+            <span class="typing-label">EduBot is thinking</span>
+            <div class="typing-dots">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    msgsContainer.appendChild(row);
+    msgsContainer.scrollTop = msgsContainer.scrollHeight;
+  }
+
+  // Hide the typing animation
+  function hideTypingIndicator() {
+    const el = document.getElementById('typing-indicator');
+    if (el) el.remove();
+  }
+
+  // Renders click-to-fill recommendation buttons below chatbot bubble
+  function renderSuggestionPills(topic) {
+    // Clear any previous ones first
+    const prev = document.getElementById('suggestions-row');
+    if (prev) prev.remove();
+
+    const container = document.createElement('div');
+    container.id = 'suggestions-row';
+    container.className = 'suggestions-container';
+
+    const questions = SUGGESTED_QUESTIONS[topic] || SUGGESTED_QUESTIONS['general'];
+    questions.forEach(q => {
+      const btn = document.createElement('button');
+      btn.className = 'suggestion-pill';
+      btn.textContent = q;
+      btn.onclick = () => triggerPill(q.substring(3)); // Strip emoji icon spacing
+      container.appendChild(btn);
+    });
+
+    msgsContainer.appendChild(container);
+    msgsContainer.scrollTop = msgsContainer.scrollHeight;
+  }
+
+  // Trigger pill clicked
+  function triggerPill(text) {
+    inputEl.value = text;
+    sendBtn.disabled = false;
+    sendQuestion();
+  }
+
+  // Update session topic tag in the sidebar
+  function updateTopicBadge(topic) {
+    let text = 'General Chat';
+    if (topic === 'placements') text = '💼 Placements preparation';
+    else if (topic === 'courses') text = '💻 Courses & Syllabus';
+    else if (topic === 'certifications') text = '📜 Certifications info';
+    else if (topic === 'support') text = '🔧 LMS Technical Support';
+    
+    topicContainer.innerHTML = `<span class="topic-badge" style="background:rgba(99,102,241,0.1); border-color:rgba(99,102,241,0.3); color:#a5b4fc">${text}</span>`;
+  }
+
+  // Reset/Clear full chat history
+  async function clearConversation() {
+    if (confirm("Are you sure you want to clear your current conversation history?")) {
+      chatHistory = [];
+      localStorage.removeItem('edubot_chat_history');
+      
+      renderChat();
+      
+      try {
+        await fetch('/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId })
+        });
+      } catch (e) {
+        console.error("Failed to reset session on server:", e);
+      }
+      
+      inputEl.value = '';
+      sendBtn.disabled = true;
+      inputEl.focus();
+    }
+  }
+
+  // Main Question Sending Handler (Handles streaming dynamically)
+  async function sendQuestion() {
+    const q = inputEl.value.trim();
+    if (!q) return;
+
+    // Clear suggestion pills
+    const prev = document.getElementById('suggestions-row');
+    if (prev) prev.remove();
+
+    // Hide welcome state
+    const welcome = document.getElementById('welcome-screen');
+    if (welcome) welcome.remove();
+
+    // Clear input
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    // Capture dynamic timestamp
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // 1. Add User message to UI and history
+    appendBubbleUI('user', q, timeStr);
+    chatHistory.push({ role: 'user', text: q, time: timeStr });
+    localStorage.setItem('edubot_chat_history', JSON.stringify(chatHistory));
+
+    // Scroll to bottom
+    msgsContainer.scrollTop = msgsContainer.scrollHeight;
+
+    // 2. Show Typing Indicator
+    showTypingIndicator();
+
+    try {
+      // 3. Initiate post streaming fetch
+      const res = await fetch('/query/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, session_id: sessionId })
+      });
+
+      hideTypingIndicator();
+
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+
+      // 4. Create empty Bot message row in UI
+      const botRow = appendBubbleUI('bot', '', timeStr);
+      const bubbleContent = botRow.querySelector('.bubble-content');
+      
+      // 5. Read response stream reader
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let botText = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const token = decoder.decode(value, { stream: true });
+        botText += token;
+        
+        // Dynamically update UI with streamed tokens
+        bubbleContent.innerHTML = formatMessageContent(botText);
+        msgsContainer.scrollTop = msgsContainer.scrollHeight;
+      }
+
+      // 6. Fetch updated session state from server to align recommendations and visual profile
+      let activeTopic = 'general';
+      try {
+        const stateRes = await fetch(`/state/${sessionId}`);
+        if (stateRes.ok) {
+          const stateData = await stateRes.json();
+          activeTopic = stateData.active_topic || 'general';
+          
+          // Update visual profile sidebar card
+          document.getElementById('profile-goal').textContent = stateData.active_goal || 'Explore courses & placements';
+          
+          let domainText = 'Analyzing interests...';
+          if (stateData.memory_profile && stateData.memory_profile.target_domain) {
+              domainText = `${stateData.memory_profile.target_domain.value} (${stateData.memory_profile.target_domain.confidence})`;
+          }
+          document.getElementById('profile-domain').textContent = domainText;
+          
+          let subjectText = 'None detected';
+          if (stateData.memory_profile && stateData.memory_profile.weak_subject) {
+              subjectText = `${stateData.memory_profile.weak_subject.value} (${stateData.memory_profile.weak_subject.confidence})`;
+          }
+          document.getElementById('profile-subject').textContent = subjectText;
+          
+          let modeText = 'Academic Mentor';
+          if (stateData.mode === 'placement_coach') modeText = '💼 Placement Coach';
+          else if (stateData.mode === 'support_assistant') modeText = '🔧 Support Assistant';
+          document.getElementById('profile-mode').textContent = modeText;
+          
+          // Render dynamic recommendations cards in the chat log
+          if (stateData.recommendations && stateData.recommendations.length > 0) {
+              const recContainer = document.createElement('div');
+              recContainer.className = 'recommendations-container';
+              
+              stateData.recommendations.forEach(rec => {
+                  const card = document.createElement('div');
+                  card.className = 'recommendation-card';
+                  card.innerHTML = `
+                      <div class="rec-header">
+                          <span class="rec-badge">${rec.badge}</span>
+                      </div>
+                      <h4 class="rec-title">${rec.title}</h4>
+                      <p class="rec-desc">${rec.description}</p>
+                      <button class="rec-btn" onclick="triggerPill('${rec.query_trigger.replace(/'/g, "\\'")}')">${rec.action_text}</button>
+                  `;
+                  recContainer.appendChild(card);
+              });
+              msgsContainer.appendChild(recContainer);
+              msgsContainer.scrollTop = msgsContainer.scrollHeight;
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch session topic state:", e);
+      }
+
+      // Save bot answer to history
+      chatHistory.push({ role: 'bot', text: botText, time: timeStr, topic: activeTopic });
+      localStorage.setItem('edubot_chat_history', JSON.stringify(chatHistory));
+
+      // 7. Render dynamic recommended follow-ups and update sidebar state
+      let mappedPillTopic = 'general';
+      const activeTopicLower = activeTopic.toLowerCase();
+      if (activeTopicLower.includes('placement') || activeTopicLower.includes('career')) mappedPillTopic = 'placements';
+      else if (activeTopicLower.includes('vtu') || activeTopicLower.includes('certif')) mappedPillTopic = 'certifications';
+      else if (activeTopicLower.includes('support') || activeTopicLower.includes('portal') || activeTopicLower.includes('contact')) mappedPillTopic = 'support';
+      else if (activeTopicLower !== 'general') mappedPillTopic = 'courses';
+
+      renderSuggestionPills(mappedPillTopic);
+      updateTopicBadge(activeTopic);
+
+    } catch (err) {
+      hideTypingIndicator();
+      console.error(err);
+      
+      const errorMsg = `⚠️ Connection Error: Failed to generate response. Please check if your FastAPI server is online.`;
+      appendBubbleUI('bot', errorMsg, timeStr);
+      
+      chatHistory.push({ role: 'bot', text: errorMsg, time: timeStr, topic: 'general' });
+      localStorage.setItem('edubot_chat_history', JSON.stringify(chatHistory));
+      renderSuggestionPills('general');
+    } finally {
+      inputEl.focus();
+    }
+  }
+</script>
+</body>
+</html>
