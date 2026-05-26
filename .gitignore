@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+backend/chroma_store/
+backend/__pycache__/
+backend/rag/__pycache__/
+backend/scraper/__pycache__/
+backend/scraper/output/
+.DS_Store
+Thumbs.db
