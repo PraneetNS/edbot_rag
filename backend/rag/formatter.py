@@ -201,13 +201,30 @@ def conversational_fallback(question: str, hits: list) -> str:
     Generates a clean, concise, conversational, and student-friendly response
     using retrieved chunks when the LLM is offline.
     """
-    # 0. Low-confidence safeguard
+    # 0. Fast rule-based conversational/greeting handlers for offline mode
+    q_clean = question.strip().lower().rstrip("?!.")
+    # Flexible greeting check
+    greetings = ["hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening"]
+    if any(g == q_clean or q_clean.startswith(g + " ") for g in greetings):
+        return "Hello! I am EduBot, your Edutainer AI Academic Mentor. How can I help you with your courses, placements, internships, or certifications today?"
+        
+    # Flexible identity check
+    identity_triggers = ["who are you", "what is your name", "what's your name", "tell me about yourself", "your identity"]
+    if any(trigger in q_clean for trigger in identity_triggers):
+        return "I am EduBot, your Edutainer AI Academic Mentor. I am here to help you navigate courses, placements, internships, and certifications on the Edutainer platform!"
+        
+    # Flexible status/feeling check
+    status_triggers = ["how are you", "how's it going", "how are you doing", "how do you do"]
+    if any(trigger in q_clean for trigger in status_triggers):
+        return "I am doing great, thank you! Ready to support your learning journey today. What educational topic or course details can I help you explore?"
+
+    # 0.5. Low-confidence safeguard
     if not hits:
-        return "I currently do not have enough verified information available regarding that topic."
+        return "I currently do not have enough verified course information available regarding that topic. Please contact our support team at support@edutainer.in for further assistance!"
         
     highest_score = max(h.score if h.score is not None else 0.0 for h in hits)
-    if highest_score < 0.35:
-        return "I currently do not have enough verified information available regarding that topic."
+    if highest_score < 0.25:  # Slightly relaxed from 0.35 to 0.25 to make RAG retrieval more lenient
+        return "I currently do not have enough verified course information available regarding that topic. Please contact our support team at support@edutainer.in for further assistance!"
 
     # 1. Clean and filter chunks
     substantive_lines, scores = clean_text_chunks(hits, confidence_threshold=0.25)
@@ -217,7 +234,7 @@ def conversational_fallback(question: str, hits: list) -> str:
     
     # 3. Handle low-confidence / insufficient information
     if not sentences:
-        return "I currently do not have enough verified information available regarding that topic."
+        return "I currently do not have enough verified course information available regarding that topic. Please contact our support team at support@edutainer.in for further assistance!"
         
     # 4. Select top 2-3 sentences to make a concise paragraph
     selected_sentences = sentences[:3]

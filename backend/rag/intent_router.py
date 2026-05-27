@@ -45,6 +45,11 @@ def classify_intent(query: str, llm=None) -> tuple[str, float]:
     query_clean = query.strip()
     query_lower = query_clean.lower()
     
+    # 0. Fast check for simple greetings/banter so they are classified as COURSE_QUERY (safe, in-scope)
+    q_simple = query_lower.rstrip("?!.")
+    if q_simple in ["hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening", "how are you", "who are you", "what's your name", "tell me about yourself"]:
+        return "COURSE_QUERY", 1.0
+        
     # 1. Strict Educational Safety & Guardrail Check (OUT_OF_SCOPE)
     for pattern in SAFETY_BLOCKLIST:
         if re.search(pattern, query_lower):
