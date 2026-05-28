@@ -8,3 +8,14 @@ backend/scraper/__pycache__/
 backend/scraper/output/
 .DS_Store
 Thumbs.db
+
+# Generated data and databases
+backend/data/
+backend/vectordb/
+basic_training_dataset.json
+chroma.sqlite3
+chromadb_backup.zip
+chunks (1).json
+chunks.json
+embeddings.npy
+final_dataset.json
