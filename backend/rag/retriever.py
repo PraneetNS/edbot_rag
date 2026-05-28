@@ -19,16 +19,16 @@ def main():
         print(f"Error: ChromaDB directory '{CHROMA_DIR}' does not exist. Please run ingest.py first.")
         return
 
-    print("Initializing HuggingFaceEmbedding (sentence-transformers/all-MiniLM-L6-v2)...")
+    print("Initializing HuggingFaceEmbedding (BAAI/bge-large-en-v1.5)...")
     embed_model = HuggingFaceEmbedding(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name="BAAI/bge-large-en-v1.5"
     )
 
     print(f"Connecting to ChromaDB client at {CHROMA_DIR}...")
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
     
-    print("Loading collection 'edubot'...")
-    collection = client.get_or_create_collection("edubot")
+    print("Loading collection 'educational_mentor_knowledgebase'...")
+    collection = client.get_or_create_collection("educational_mentor_knowledgebase")
 
     vector_store = ChromaVectorStore(
         chroma_collection=collection

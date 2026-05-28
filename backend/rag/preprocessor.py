@@ -1,4 +1,5 @@
 import re
+from rag.semantic_query_expander import SemanticQueryExpander
 
 # Context-aware trigger keywords for ambiguous abbreviation "OS"
 OS_TRIGGERS = {
@@ -7,10 +8,10 @@ OS_TRIGGERS = {
     "computer", "science", "software", "system", "vtu", "lms"
 }
 
-def preprocess_query(query: str) -> str:
+def preprocess_query(query: str, active_topic: str = None, last_courses: list = None) -> str:
     """
     Normalizes educational abbreviations and enhances query semantics
-    to maximize ChromaDB retrieval relevance.
+    using the SemanticQueryExpander to maximize retrieval relevance.
     """
     if not query:
         return ""
@@ -35,7 +36,6 @@ def preprocess_query(query: str) -> str:
     # Only expand "OS" to "Operating Systems" if adjacent to computer science / academic keywords
     if re.search(r"\bOS\b", normalized, flags=re.IGNORECASE):
         query_words = [w.lower() for w in re.findall(r"\b\w+\b", normalized)]
-        # Check if any trigger word exists in the query
         has_academic_context = any(t in query_words for t in OS_TRIGGERS)
         if has_academic_context:
             normalized = re.sub(r"\bOS\b", "Operating Systems", normalized, flags=re.IGNORECASE)
@@ -53,5 +53,9 @@ def preprocess_query(query: str) -> str:
         
     # Clean redundant whitespaces
     normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    # 4. Integrate Semantic Query Expansion
+    expander = SemanticQueryExpander()
+    normalized = expander.expand_query(normalized, active_topic=active_topic, last_courses=last_courses)
     
     return normalized

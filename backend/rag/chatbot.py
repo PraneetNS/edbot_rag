@@ -39,14 +39,14 @@ def main():
         print("The chatbot will run in FALLBACK MODE (displaying retrieved chunks only).")
         print("!"*60 + "\n")
 
-    print("Initializing HuggingFaceEmbedding...")
+    print("Initializing HuggingFaceEmbedding (BAAI/bge-large-en-v1.5)...")
     embed_model = HuggingFaceEmbedding(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name="BAAI/bge-large-en-v1.5"
     )
 
     print("Connecting to ChromaDB...")
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    collection = client.get_or_create_collection("edubot")
+    collection = client.get_or_create_collection("educational_mentor_knowledgebase")
 
     vector_store = ChromaVectorStore(chroma_collection=collection)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)

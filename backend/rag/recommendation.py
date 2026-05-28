@@ -1,26 +1,6 @@
 # Edutainer asset catalog to score and recommend
 ASSETS_CATALOG = [
     {
-        "id": "react_course",
-        "type": "course",
-        "title": "Master React JS",
-        "description": "Gain practical front-end skills, build real projects, and earn your React JS certification.",
-        "badge": "Popular Course",
-        "action_text": "Explore React Course",
-        "query_trigger": "What is the React JS course syllabus?",
-        "tags": ["web development", "react js", "coding", "course", "syllabus"]
-    },
-    {
-        "id": "ai_course",
-        "type": "course",
-        "title": "Artificial Intelligence Online",
-        "description": "Explore core AI concepts, data preprocessing, and model evaluations with VTU validation.",
-        "badge": "Hot & Trending",
-        "action_text": "Explore AI Course",
-        "query_trigger": "What does the Artificial Intelligence course offer?",
-        "tags": ["ai/ml", "artificial intelligence", "data science", "course"]
-    },
-    {
         "id": "ielts_course",
         "type": "course",
         "title": "English IELTS Readiness",
