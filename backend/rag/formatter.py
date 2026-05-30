@@ -206,15 +206,15 @@ def conversational_fallback(question: str, hits: list) -> str:
     q_clean = question.strip().lower().rstrip("?!.")
     greetings = ["hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening"]
     if any(g == q_clean or q_clean.startswith(g + " ") for g in greetings):
-        return "Hello! I am EduBot, your Edutainer AI Academic Mentor. How can I help you with your courses, placements, internships, or certifications today?"
+        return "Hello! I am EduBot, your Edutainer AI Engineering Academic Mentor. How can I help you with your engineering courses, placements, internships, or certifications today?"
         
     identity_triggers = ["who are you", "what is your name", "what's your name", "tell me about yourself", "your identity"]
     if any(trigger in q_clean for trigger in identity_triggers):
-        return "I am EduBot, your Edutainer AI Academic Mentor. I am here to help you navigate courses, placements, internships, and certifications on the Edutainer platform!"
+        return "I am EduBot, your dedicated Edutainer AI Engineering Academic Mentor. I am here to guide 2nd, 3rd, and 4th-year engineering students on academics, technical skills (DSA, OOP, Web Dev, AI/ML), placements, and VTU certifications!"
         
     status_triggers = ["how are you", "how's it going", "how are you doing", "how do you do"]
     if any(trigger in q_clean for trigger in status_triggers):
-        return "I am doing great, thank you! Ready to support your learning journey today. What educational topic or course details can I help you explore?"
+        return "I am doing great, thank you! Ready to support your engineering learning journey today. What year of engineering are you in, or what concepts can I help you explore?"
 
     # 0.5. Soft Confidence Threshold & Dynamic Fallbacks
     highest_score = max(h.score if h.score is not None else 0.0 for h in hits) if hits else 0.0
@@ -226,11 +226,43 @@ def conversational_fallback(question: str, hits: list) -> str:
         "syllabus", "curriculum", "schedule", "class", "project", "assignment", "bot", 
         "edutainer", "edubot", "programming", "code", "developer", "development", 
         "software", "database", "sql", "computer", "science", "engineering", 
-        "math", "algorithm", "data", "structure"
+        "math", "algorithm", "data", "structure", "second", "2nd", "third", "3rd", 
+        "fourth", "4th", "final", "sophomore", "junior", "senior", "capstone", 
+        "dsa", "oop", "system design", "resume", "interview", "mentor", "roadmaps"
     ])
-    
+    if not is_educational:
+        return (
+            "I am EduBot, your dedicated AI Engineering Academic Mentor. I can only assist you with questions "
+            "related to engineering courses, core CS concepts (DSA, OOP, SQL), placements, internships, VTU certifications, "
+            "and LMS support.\n\n"
+            "Please let me know how I can help you with your academic or career development in engineering!"
+        )
+
     if is_educational and (not hits or highest_score < 0.25):
-        if any(k in q_clean for k in ["placement", "job", "career", "interview", "resume", "recruit", "internship"]):
+        if any(k in q_clean for k in ["second year", "2nd year", "sophomore"]):
+            return (
+                "For 2nd-year engineering students, my primary goal is to help you build ironclad CS foundations, "
+                "including Data Structures & Algorithms (DSA), Object-Oriented Programming (OOP using Java/C++), "
+                "Database Management Systems (SQL), and Operating Systems. Maintaining a strong CGPA and working "
+                "on foundational mini-projects during this stage is highly recommended. \n\n"
+                "What foundational concept or language can I help you explore today?"
+            )
+        elif any(k in q_clean for k in ["third year", "3rd year", "junior"]):
+            return (
+                "For 3rd-year engineering students, our focus is professional upskilling and career readiness, "
+                "specifically targeting Full-Stack Web Development (React JS, Node.js), introductory System Design, "
+                "Software Engineering, and securing summer internships. Preparing your resume and completing VTU "
+                "virtual internships/certifications will significantly boost your profile. \n\n"
+                "Would you like guidance on building your resume, or information about VTU virtual internship requirements?"
+            )
+        elif any(k in q_clean for k in ["fourth year", "4th year", "final year", "senior", "capstone"]):
+            return (
+                "For 4th-year/final-year engineering students, our focus shifts to advanced specializations like "
+                "Artificial Intelligence, Machine Learning, Cloud Systems, preparing for Capstone projects, and rigorous "
+                "placement preparation including mock technical interviews, resume workshops, and campus drives. \n\n"
+                "Would you like me to guide you to our placement preparation roadmap, or discuss capstone project execution?"
+            )
+        elif any(k in q_clean for k in ["placement", "job", "career", "interview", "resume", "recruit", "internship"]):
             return (
                 "While our direct placement preparation records are not fully detailed here, Edutainer provides "
                 "industry-aligned career guidance, resume mentoring workshops, mock technical interviews, and engineering "
@@ -293,7 +325,13 @@ def conversational_fallback(question: str, hits: list) -> str:
     # 5. Determine active topic to format custom student-friendly conversational endings
     q_lower = question.lower()
     topic = "general"
-    if any(k in q_lower for k in ["placement", "job", "career", "interview", "resume", "recruit"]):
+    if any(k in q_lower for k in ["second year", "2nd year", "sophomore"]):
+        topic = "2nd_year"
+    elif any(k in q_lower for k in ["third year", "3rd year", "junior"]):
+        topic = "3rd_year"
+    elif any(k in q_lower for k in ["fourth year", "4th year", "final year", "senior", "capstone"]):
+        topic = "4th_year"
+    elif any(k in q_lower for k in ["placement", "job", "career", "interview", "resume", "recruit"]):
         topic = "placements"
     elif any(k in q_lower for k in ["react", "python", "java", "course", "syllabus", "curriculum", "learn", "teach", "class"]):
         topic = "courses"
@@ -306,7 +344,22 @@ def conversational_fallback(question: str, hits: list) -> str:
     full_response = clean_response(summary_paragraph)
     
     # 7. Add a student-friendly educational guide closing and exactly one follow-up question
-    if topic == "courses":
+    if topic == "2nd_year":
+        full_response += (
+            "\n\nMaintaining a solid CGPA and starting foundational mini-projects during your sophomore year is highly advised. "
+            "What computer science topic or language are you looking to master next?"
+        )
+    elif topic == "3rd_year":
+        full_response += (
+            "\n\nSecuring summer internships and obtaining verified industry certificates will significantly improve your profile. "
+            "Would you like guidance on how to structure your resume or prep for mock technical interviews next?"
+        )
+    elif topic == "4th_year":
+        full_response += (
+            "\n\nPreparing for rigorous placement drives and executing a strong Capstone project are critical final year milestones. "
+            "What specific role or technology specialization are you targeting for your placements?"
+        )
+    elif topic == "courses":
         full_response += (
             "\n\nWould you like me to guide you to the course registration page on your dashboard, "
             "or would you like more details about a specific syllabus?"
@@ -328,7 +381,7 @@ def conversational_fallback(question: str, hits: list) -> str:
         )
     else:
         full_response += (
-            "\n\nI hope this helps support your learning journey! What other questions or topic "
+            "\n\nI hope this helps support your engineering learning journey! What other questions or topic "
             "would you like to explore next?"
         )
         
