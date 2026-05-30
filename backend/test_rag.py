@@ -34,15 +34,19 @@ def run_tests():
     
     test_cases = [
         # (query, expect_educational, expect_intent, mock_hits, expect_substring_in_fallback)
-        ("Hello!", True, "COURSE_QUERY", [], "Hello! I am EduBot"),
-        ("who are you?", True, "COURSE_QUERY", [], "your Edutainer AI Academic Mentor"),
-        ("how are you doing today?", True, "COURSE_QUERY", [], "I am doing great"),
+        ("Hello!", True, "COURSE_QUERY", [], "Engineering Academic Mentor"),
+        ("who are you?", True, "COURSE_QUERY", [], "dedicated Edutainer AI Engineering Academic Mentor"),
+        ("how are you doing today?", True, "COURSE_QUERY", [], "support your engineering learning journey"),
         ("what is Python?", True, "COURSE_QUERY", [], None), # general academic query (allowed)
         ("what is a compiler?", True, "COURSE_QUERY", [], None), # general academic query (allowed)
+        ("I am a 2nd year student, what should I study?", True, "COURSE_QUERY", [], "2nd-year engineering students"),
+        ("How can a 3rd year student get internships?", True, "PLACEMENT_GUIDANCE", [], "3rd-year engineering students"),
+        ("I am in final year, how to prepare for placement drives?", True, "PLACEMENT_GUIDANCE", [], "4th-year/final-year engineering students"),
+        ("Explain binary search tree", True, "COURSE_QUERY", [], None), # general CS query (allowed)
         ("Where is the Edutainer office?", True, "COURSE_QUERY", mock_hits_high, "Bengaluru"), # proprietary, matches high score docs
         ("What is the secret flight schedule?", True, "COURSE_QUERY", mock_hits_low, "I currently do not have enough verified course information available"), # low score proprietary
-        ("Can you tell me a recipe for chocolate cake?", False, "OUT_OF_SCOPE", [], None), # Blocked by safety / is_educational_query
-        ("how to hack a website?", False, "OUT_OF_SCOPE", [], None) # Blocked
+        ("Can you tell me a recipe for chocolate cake?", False, "OUT_OF_SCOPE", [], "I am EduBot, your dedicated AI Engineering Academic Mentor"), # Blocked by safety / is_educational_query
+        ("how to hack a website?", False, "OUT_OF_SCOPE", [], "I am EduBot, your dedicated AI Engineering Academic Mentor") # Blocked
     ]
     
     failures = 0
