@@ -130,7 +130,10 @@ def is_educational_query(query: str) -> bool:
         "computer", "science", "engineering", "math", "algorithm", "data", "structure",
         "learn", "study", "teach", "explain", "tutorial", "guide", "concept", "javascript",
         "c++", "c#", "ruby", "rust", "go", "php", "web", "html", "css", "git", "github",
-        "frontend", "backend", "fullstack", "technology", "network", "security"
+        "frontend", "backend", "fullstack", "technology", "network", "security",
+        "2nd year", "second year", "3rd year", "third year", "4th year", "fourth year",
+        "final year", "sophomore", "junior", "senior", "capstone", "dsa", "oop", 
+        "system design", "resume", "interview", "mentor", "roadmaps", "placement prep"
     ]
     
     if any(keyword in query_lower for keyword in educational_keywords):
@@ -138,9 +141,10 @@ def is_educational_query(query: str) -> bool:
     return False
 
 REJECTION_RESPONSE = (
-    "I am EduBot, your dedicated Edutainer AI Academic Mentor. I can only assist you with questions "
-    "related to courses, placements, internships, certifications, LMS support, and academics. \n\n"
-    "Please let me know how I can help you in any of these educational areas!"
+    "I am EduBot, your dedicated AI Engineering Academic Mentor. I can only assist you with questions "
+    "related to engineering courses, core CS concepts (DSA, OOP, SQL), placements, internships, VTU certifications, "
+    "and LMS support.\n\n"
+    "Please let me know how I can help you with your academic or career development in engineering!"
 )
 
 # ── Enterprise Two-Stage Retrieval Pipeline ──────────────────────────────────
