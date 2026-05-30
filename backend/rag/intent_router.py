@@ -4,7 +4,8 @@ import re
 INTENT_RULES = {
     "PLACEMENT_GUIDANCE": [
         r"\bplacements?\b", r"\bjobs?\b", r"\bcareers?\b", r"\binterviews?\b", 
-        r"\bresumes?\b", r"\brecruits?\b", r"\bhiring\b", r"\binternships?\b", r"\bemployability\b"
+        r"\bresumes?\b", r"\brecruits?\b", r"\bhiring\b", r"\binternships?\b", r"\bemployability\b",
+        r"\bplacement prep(aration)?\b", r"\bcareer guidance\b", r"\binterview prep(aration)?\b", r"\broadmaps?\b"
     ],
     "LMS_SUPPORT": [
         r"\blms\b", r"\belms\b", r"\bportals?\b", r"\blogins?\b", r"\bpasswords?\b", 
@@ -23,7 +24,10 @@ INTENT_RULES = {
     ],
     "COURSE_QUERY": [
         r"\bcourses?\b", r"\bsyllabus\b", r"\bsyllabi\b", r"\bcurriculum\b", r"\breact\b", 
-        r"\bpython\b", r"\bjava\b", r"\bclasses?\b", r"\blearn\b"
+        r"\bpython\b", r"\bjava\b", r"\bclasses?\b", r"\blearn\b", r"\bdsa\b", r"\balgorithms?\b",
+        r"\bdata structures?\b", r"\boop\b", r"\bsystem design\b", r"\bsecond year\b", r"\b2nd year\b",
+        r"\bthird year\b", r"\b3rd year\b", r"\bfourth year\b", r"\b4th year\b", r"\bfinal year\b",
+        r"\bsophomores?\b", r"\bjuniors?\b", r"\bseniors?\b", r"\bmentorship\b", r"\bmentor\b"
     ]
 }
 
