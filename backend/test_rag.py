@@ -29,8 +29,45 @@ mock_hits_high = [
     MockHit(score=0.85, node_id="2", text="The main office is located at No - 110, 7th Cross Rd, Dollar Layout, BTM 2nd Stage, Bengaluru, Karnataka 560076.", file_name="faq.txt")
 ]
 
+def test_memory_pruning():
+    print("\n=== RUNNING MEMORY PRUNING TESTS ===")
+    from rag.memory import ContextMemory
+    
+    # Create memory with a tight max_capacity of 2
+    mem = ContextMemory(session_id="test_session", max_capacity=2)
+    
+    # Extract domain 1
+    mem.extract_memories("I love AI/ML", "COURSE_QUERY", "I love AI/ML")
+    # Extract domain 2
+    mem.extract_memories("I love Web Dev", "COURSE_QUERY", "I love Web Dev")
+    # Extract domain 3
+    mem.extract_memories("I love Cybersecurity", "COURSE_QUERY", "I love Cybersecurity")
+    
+    # The first one (ai/ml) should be auto-pruned to respect capacity of 2
+    print(f"  Active domains in memory: {list(mem.target_domains.keys())}")
+    assert len(mem.target_domains) <= 2, f"Capacity exceeded! Size: {len(mem.target_domains)}"
+    assert "ai/ml" not in mem.target_domains, "Expected 'ai/ml' to be pruned"
+    print("  --> MEMORY PRUNING RESULT: PASSED")
+
+def test_input_validation():
+    print("\n=== RUNNING INPUT VALIDATION TESTS ===")
+    from api import QueryRequest
+    
+    # Validate empty request creation
+    empty_req = QueryRequest(question="")
+    assert empty_req.question == "", "Empty request question check failed"
+    
+    # Validate long request creation
+    long_req = QueryRequest(question="x" * 1600)
+    assert len(long_req.question) == 1600, "Long request question check failed"
+    print("  --> INPUT VALIDATION RESULT: PASSED")
+
 def run_tests():
-    print("=== STARTING RAG RELAXATION TESTS ===")
+    # Run the new feature validation tests first
+    test_memory_pruning()
+    test_input_validation()
+    
+    print("\n=== STARTING RAG RELAXATION TESTS ===")
     
     test_cases = [
         # (query, expect_educational, expect_intent, mock_hits, expect_substring_in_fallback)
