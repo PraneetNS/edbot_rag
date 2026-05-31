@@ -301,6 +301,39 @@ def clean_stream_generator(response_gen):
 
 @app.post("/query", response_model=QueryResponse)
 async def query_endpoint(req: QueryRequest):
+    # 0. Input Validation
+    q_stripped = req.question.strip()
+    if not q_stripped:
+        session_id = req.session_id or "default"
+        session = get_or_create_session(session_id)
+        visual_profile = session["memory"].get_visual_profile()
+        return QueryResponse(
+            question=req.question,
+            response="Query cannot be empty. Please ask a valid question.",
+            active_topic=session["state"].active_topic,
+            active_intent="INVALID_QUERY",
+            active_goal=session["state"].active_goal,
+            mode=session["state"].mode,
+            memory_profile=visual_profile,
+            recommendations=[],
+            retrieval_confidence=0.0
+        )
+    if len(req.question) > 1500:
+        session_id = req.session_id or "default"
+        session = get_or_create_session(session_id)
+        visual_profile = session["memory"].get_visual_profile()
+        return QueryResponse(
+            question=req.question,
+            response="Query is too long (maximum 1500 characters). Please simplify your question.",
+            active_topic=session["state"].active_topic,
+            active_intent="INVALID_QUERY",
+            active_goal=session["state"].active_goal,
+            mode=session["state"].mode,
+            memory_profile=visual_profile,
+            recommendations=[],
+            retrieval_confidence=0.0
+        )
+
     # 1. Guardrail Check
     if not is_educational_query(req.question):
         session_id = req.session_id or "default"
@@ -411,6 +444,17 @@ async def query_endpoint(req: QueryRequest):
 
 @app.post("/query/stream")
 async def query_stream_endpoint(req: QueryRequest):
+    # 0. Input Validation
+    q_stripped = req.question.strip()
+    if not q_stripped:
+        async def reject_generator():
+            yield "Query cannot be empty. Please ask a valid question."
+        return StreamingResponse(reject_generator(), media_type="text/event-stream")
+    if len(req.question) > 1500:
+        async def reject_generator():
+            yield "Query is too long (maximum 1500 characters). Please simplify your question."
+        return StreamingResponse(reject_generator(), media_type="text/event-stream")
+
     # 1. Guardrail Check
     if not is_educational_query(req.question):
         async def reject_generator():
