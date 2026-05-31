@@ -31,6 +31,19 @@ BASE_DIR = Path(__file__).resolve().parent
 CHROMA_DIR = BASE_DIR / "chroma_store"
 STATIC_DIR = BASE_DIR / "static"
 
+# Ensure logs directory exists
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+
+# Configure logging
+import logging
+logging.basicConfig(
+    filename=str(LOGS_DIR / "pipeline.log"),
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger("RAG_Pipeline")
+
 app = FastAPI(title="EduBot RAG API")
 
 # Mount static files
@@ -153,21 +166,42 @@ def retrieve_and_rerank_chunks(query: str, intent: str, active_topic: str, debug
     Executes the entire enterprise-grade retrieve-filter-route-rerank pipeline.
     Returns: (top_chunks, retrieval_confidence)
     """
+    start_total = time.time()
+    
     # 1. Broad Hybrid Retrieval (Dense Vector + Sparse Token-Overlap)
+    t0 = time.time()
     hybrid_hits = hybrid_retriever.retrieve(query)
+    lat_hybrid = time.time() - t0
     
     # 2. Quality Filtering (repetition, short text, UI noise, Jaccard duplicates)
+    t0 = time.time()
     from rag.retrieval_filter import filter_retrieved_chunks
     quality_hits = filter_retrieved_chunks(hybrid_hits, similarity_threshold=0.75)
     
     if not quality_hits:
         quality_hits = hybrid_hits
+    lat_filter = time.time() - t0
         
     # 3. Metadata Routing & Filtering based on Intent
+    t0 = time.time()
     routed_hits = metadata_router.route_and_filter(quality_hits, intent)
+    lat_route = time.time() - t0
     
     # 4. Cross-Encoder Reranking and Retrieval Confidence Score Computation
+    t0 = time.time()
     top_hits, confidence = reranker.rerank(query, routed_hits, top_n=3)
+    lat_rerank = time.time() - t0
+    
+    total_lat = time.time() - start_total
+    
+    logger.info(
+        f"Pipeline stats for query='{query[:30]}...' | "
+        f"hybrid={lat_hybrid:.4f}s ({len(hybrid_hits)} hits) | "
+        f"filter={lat_filter:.4f}s ({len(quality_hits)} hits) | "
+        f"route={lat_route:.4f}s ({len(routed_hits)} hits) | "
+        f"rerank={lat_rerank:.4f}s ({len(top_hits)} hits) | "
+        f"total={total_lat:.4f}s | confidence={confidence:.4f}"
+    )
     
     if debug:
         print("\n=== ENTERPRISE RAG RETRIEVAL PIPELINE DEBUG ===")
