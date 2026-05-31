@@ -563,6 +563,28 @@ async def state_endpoint(session_id: str):
         retrieval_confidence=1.0
     )
 
+@app.get("/api/stats")
+async def stats_endpoint():
+    try:
+        # Get all metadatas to analyze
+        data = collection.get(include=["metadatas"])
+        metadatas = data.get("metadatas", [])
+        
+        # Count chunks by file_name
+        file_counts = {}
+        for meta in metadatas:
+            if meta:
+                file_name = meta.get("file_name", "unknown")
+                file_counts[file_name] = file_counts.get(file_name, 0) + 1
+                
+        return {
+            "total_chunks": collection.count(),
+            "distinct_sources": len(file_counts),
+            "sources": file_counts
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "chunks_indexed": collection.count(), "ollama_online": check_ollama_running()}
