@@ -6,11 +6,24 @@ class ContextMemory:
     Manages persistent student learning attributes (goals, weak subjects, target domains)
     with score decay, confidence classification, and selective relevance retrieval.
     """
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, max_capacity: int = 5):
         self.session_id = session_id
+        self.max_capacity = max_capacity
         self.target_domains = {}  # Format: {value: {score, last_used, confidence}}
         self.weak_subjects = {}
         self.learning_goals = {}
+
+    def _enforce_capacity(self, category_dict):
+        """
+        Enforces maximum capacity limits by removing the lowest-scoring, oldest items.
+        """
+        if len(category_dict) > self.max_capacity:
+            sorted_keys = sorted(
+                category_dict.keys(),
+                key=lambda k: (category_dict[k]["score"], category_dict[k]["last_used"])
+            )
+            while len(category_dict) > self.max_capacity:
+                del category_dict[sorted_keys.pop(0)]
 
     def extract_memories(self, query: str, intent: str, expanded_query: str):
         """
@@ -82,6 +95,11 @@ class ContextMemory:
                     "last_used": now,
                     "confidence": "Medium Confidence"
                 }
+
+        # Enforce capacity limits across memory categories
+        self._enforce_capacity(self.target_domains)
+        self._enforce_capacity(self.weak_subjects)
+        self._enforce_capacity(self.learning_goals)
 
         # Automatically decay scores for all stored memory attributes
         self.decay_memories()
