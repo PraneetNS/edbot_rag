@@ -23,4 +23,6 @@ final_dataset.json
 # Local databases and large datasets
 chroma_db/
 *.jsonl
+*.log
+
 
