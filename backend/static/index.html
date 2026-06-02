@@ -856,31 +856,14 @@
       welcomeDiv.id = 'welcome-screen';
       welcomeDiv.innerHTML = `
         <div class="welcome-icon">🤖</div>
-        <h2>Meet EduBot, your AI Academic Mentor</h2>
+        <h2>Meet EduMentor, your AI Academic Mentor</h2>
         <p>I am here to guide you through Edutainer's LMS portal. Ask me about course syllabi, engineering placements prep, internship opportunities, support tickets, and VTU certificates.</p>
-        <div class="welcome-grid">
-          <div class="welcome-card" onclick="triggerPill('What courses does Edutainer offer?')">
-            <h4>💻 Browse Courses</h4>
-            <p>React JS, Python, Java, Core Engineering & more.</p>
-          </div>
-          <div class="welcome-card" onclick="triggerPill('What is the placement preparation roadmap?')">
-            <h4>💼 Placements Prep</h4>
-            <p>Roadmaps, resume mentoring, internships.</p>
-          </div>
-          <div class="welcome-card" onclick="triggerPill('How do I download my VTU certificate?')">
-            <h4>📜 VTU Certificate</h4>
-            <p>Stamp verification, portal downloads.</p>
-          </div>
-          <div class="welcome-card" onclick="triggerPill('How do I contact Edutainer support?')">
-            <h4>🔧 Contact Support</h4>
-            <p>LMS login issues, support queries.</p>
-          </div>
-        </div>
       `;
       msgsContainer.appendChild(welcomeDiv);
       topicContainer.innerHTML = `<span class="topic-badge">General Chat</span>`;
       return;
     }
+
 
     // Render historical messages
     chatHistory.forEach((msg, idx) => {
@@ -951,23 +934,8 @@
     // Clear any previous ones first
     const prev = document.getElementById('suggestions-row');
     if (prev) prev.remove();
-
-    const container = document.createElement('div');
-    container.id = 'suggestions-row';
-    container.className = 'suggestions-container';
-
-    const questions = SUGGESTED_QUESTIONS[topic] || SUGGESTED_QUESTIONS['general'];
-    questions.forEach(q => {
-      const btn = document.createElement('button');
-      btn.className = 'suggestion-pill';
-      btn.textContent = q;
-      btn.onclick = () => triggerPill(q.substring(3)); // Strip emoji icon spacing
-      container.appendChild(btn);
-    });
-
-    msgsContainer.appendChild(container);
-    msgsContainer.scrollTop = msgsContainer.scrollHeight;
   }
+
 
   // Trigger pill clicked
   function triggerPill(text) {
@@ -1107,27 +1075,7 @@
           else if (stateData.mode === 'support_assistant') modeText = '🔧 Support Assistant';
           document.getElementById('profile-mode').textContent = modeText;
           
-          // Render dynamic recommendations cards in the chat log
-          if (stateData.recommendations && stateData.recommendations.length > 0) {
-              const recContainer = document.createElement('div');
-              recContainer.className = 'recommendations-container';
-              
-              stateData.recommendations.forEach(rec => {
-                  const card = document.createElement('div');
-                  card.className = 'recommendation-card';
-                  card.innerHTML = `
-                      <div class="rec-header">
-                          <span class="rec-badge">${rec.badge}</span>
-                      </div>
-                      <h4 class="rec-title">${rec.title}</h4>
-                      <p class="rec-desc">${rec.description}</p>
-                      <button class="rec-btn" onclick="triggerPill('${rec.query_trigger.replace(/'/g, "\\'")}')">${rec.action_text}</button>
-                  `;
-                  recContainer.appendChild(card);
-              });
-              msgsContainer.appendChild(recContainer);
-              msgsContainer.scrollTop = msgsContainer.scrollHeight;
-          }
+
         }
       } catch (e) {
         console.error("Failed to fetch session topic state:", e);

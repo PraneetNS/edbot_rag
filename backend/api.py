@@ -1,8 +1,9 @@
 from pathlib import Path
 import sys
 import time
-import requests
 import re
+import asyncio
+from typing import Generator
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -12,26 +13,12 @@ from pydantic import BaseModel
 # Allow imports from backend root
 sys.path.append(str(Path(__file__).resolve().parent))
 
-import chromadb
-from llama_index.core import VectorStoreIndex, StorageContext
-from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.core.memory import ChatMemoryBuffer
-from rag.prompt import SYSTEM_PROMPT
+from rag.retrieval.retriever import load_rag_index, get_edumentor_query_engine, check_ollama_active
+from rag.config import CHROMA_PERSIST_DIR, CHROMA_COLLECTION_NAME
 
-# Import new enterprise RAG modules
-from rag.query_encoder import QueryEncoder
-from rag.hybrid_retriever import HybridRetriever
-from rag.metadata_router import MetadataRouter
-from rag.reranker import Reranker
-from rag.context_synthesizer import ContextSynthesizer
-from rag.response_cleaner import ResponseCleaner
-
+# Setup base paths
 BASE_DIR = Path(__file__).resolve().parent
-CHROMA_DIR = BASE_DIR / "chroma_store"
 STATIC_DIR = BASE_DIR / "static"
-
-# Ensure logs directory exists
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 
@@ -50,73 +37,200 @@ app = FastAPI(title="EduBot RAG API")
 STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# ── Load index once at startup ───────────────────────────────────────────────
-print("Loading BAAI embedding model...")
-query_encoder = QueryEncoder("BAAI/bge-large-en-v1.5")
-embed_model = query_encoder.embed_model
+# ── Load index and query engine once at startup ──────────────────────────────
+print("Loading RAG index and query engine...")
+try:
+    index = load_rag_index()
+    query_engine = get_edumentor_query_engine(index)
+    print("EduBot Modernized RAG API ready.")
+except Exception as e:
+    print(f"Error loading database index or query engine: {e}")
+    index = None
+    query_engine = None
 
-print("Connecting to ChromaDB...")
-client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-collection = client.get_or_create_collection("educational_mentor_knowledgebase")
+# ── Session Storage and State Management ─────────────────────────────────────
+class SessionState:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.active_topic = "general"
+        self.active_intent = "COURSE_QUERY"
+        self.workflow = "general"
+        self.mode = "academic_mentor"
+        self.last_courses_discussed = []
+        self.active_goal = "Explore courses & placements"
+        self.memory_profile = {
+            "target_domain": {"value": "Computer Science", "confidence": "high"},
+            "weak_subject": {"value": "None detected", "confidence": "medium"}
+        }
+        self.recommendations = []
 
-vector_store = ChromaVectorStore(chroma_collection=collection)
-storage_context = StorageContext.from_defaults(vector_store=vector_store)
-index = VectorStoreIndex.from_vector_store(
-    vector_store,
-    storage_context=storage_context,
-    embed_model=embed_model,
-)
-
-# Initialize modular enterprise RAG pipeline components
-hybrid_retriever = HybridRetriever(index, collection, similarity_top_k=6)
-metadata_router = MetadataRouter()
-reranker = Reranker("cross-encoder/ms-marco-MiniLM-L-6-v2")
-context_synthesizer = ContextSynthesizer()
-response_cleaner = ResponseCleaner()
-
-print("EduBot Enterprise RAG API ready.")
-
-# ── Session Storage and Helpers ───────────────────────────────────────────────
 sessions = {}
 
-def check_ollama_running() -> bool:
-    try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=2)
-        return response.status_code == 200
-    except requests.exceptions.RequestException:
-        return False
-
-def get_or_create_session(session_id: str):
+def get_or_create_session(session_id: str) -> SessionState:
+    if not session_id:
+        session_id = "default"
     if session_id not in sessions:
-        ollama_online = check_ollama_running()
-        engine = None
-        if ollama_online:
-            try:
-                from llama_index.llms.ollama import Ollama
-                llm = Ollama(model="mistral", system_prompt=SYSTEM_PROMPT, request_timeout=120.0)
-                memory = ChatMemoryBuffer.from_defaults(token_limit=2000)
-                engine = index.as_chat_engine(
-                    chat_mode="condense_plus_context",
-                    llm=llm,
-                    memory=memory,
-                    similarity_top_k=2,
-                    system_prompt=SYSTEM_PROMPT
-                )
-                print(f"Created chat engine for session: {session_id}")
-            except Exception as e:
-                print(f"Error creating Ollama chat engine for {session_id}: {e}")
-                engine = None
-        
-        from rag.conversation_state import ConversationState
-        from rag.memory import ContextMemory
-        
-        sessions[session_id] = {
-            "chat_engine": engine,
-            "created_at": time.time(),
-            "state": ConversationState(session_id),
-            "memory": ContextMemory(session_id)
-        }
+        sessions[session_id] = SessionState(session_id)
+        # Initial recommendations
+        sessions[session_id].recommendations = generate_recommendations("general")
     return sessions[session_id]
+
+# ── Recommendations Generator ────────────────────────────────────────────────
+def generate_recommendations(topic: str) -> list[dict]:
+    if topic == "placements":
+        return [
+            {
+                "badge": "Career Guide",
+                "title": "Placement Prep Roadmap",
+                "description": "Access the step-by-step roadmap to crack product-based companies.",
+                "query_trigger": "Tell me about the placement preparation roadmap",
+                "action_text": "View Roadmap"
+            },
+            {
+                "badge": "Resume Review",
+                "title": "Resume Mentoring",
+                "description": "Learn the best tips to optimize your resume for ATS screening.",
+                "query_trigger": "What are the best resume tips for engineering placements?",
+                "action_text": "Get Resume Tips"
+            }
+        ]
+    elif topic == "certifications":
+        return [
+            {
+                "badge": "VTU Info",
+                "title": "Certificate Stamp Verification",
+                "description": "Learn about the double-stamp system on VTU co-branded certificates.",
+                "query_trigger": "Tell me about the VTU certificate stamp",
+                "action_text": "Verify Stamps"
+            },
+            {
+                "badge": "Downloads",
+                "title": "Download Guide",
+                "description": "Instructions to download your verified certificate from the LMS portal.",
+                "query_trigger": "How do I download my VTU certificate?",
+                "action_text": "Download Guide"
+            }
+        ]
+    elif topic == "support":
+        return [
+            {
+                "badge": "LMS Help",
+                "title": "Technical Support Contacts",
+                "description": "Get email addresses and contact info for the tech support team.",
+                "query_trigger": "How can I contact the academic support team?",
+                "action_text": "Get Contacts"
+            },
+            {
+                "badge": "Troubleshoot",
+                "title": "Login Issues",
+                "description": "Resolve issues related to credential mismatch or loading spinner.",
+                "query_trigger": "I am having trouble with logging in.",
+                "action_text": "Fix Login"
+            }
+        ]
+    elif topic == "courses":
+        return [
+            {
+                "badge": "React JS",
+                "title": "React Course Syllabus",
+                "description": "Check the modules, project assignments, and duration for React training.",
+                "query_trigger": "What is the React JS course syllabus?",
+                "action_text": "View React Syllabus"
+            },
+            {
+                "badge": "Full Curriculum",
+                "title": "Engineering Core Courses",
+                "description": "Browse our catalog of CS concepts, placement prep, and programming tracks.",
+                "query_trigger": "What courses are currently offered by Edutainer?",
+                "action_text": "Browse Courses"
+            }
+        ]
+    else:  # general
+        return [
+            {
+                "badge": "Welcome",
+                "title": "Explore Edutainer",
+                "description": "Find out what courses are currently offered by Edutainer.",
+                "query_trigger": "What courses are currently offered by Edutainer?",
+                "action_text": "Explore Courses"
+            },
+            {
+                "badge": "Placements",
+                "title": "Placement Assistance",
+                "description": "Learn how Edutainer helps you prepare for placements and internships.",
+                "query_trigger": "Can you help me prepare for placements?",
+                "action_text": "Get Placement Help"
+            }
+        ]
+
+# ── Dynamic Session State Updater ───────────────────────────────────────────
+def update_session_state(session: SessionState, question: str):
+    q = question.lower().strip()
+    
+    # 1. Update Topic & Mode & Intent
+    if any(k in q for k in ["placement", "job", "career", "interview", "resume", "recruit"]):
+        session.active_topic = "placements"
+        session.active_intent = "PLACEMENT_GUIDANCE"
+        session.mode = "placement_coach"
+        session.active_goal = "Prepare for placement drives & resume review"
+        if "resume" in q:
+            session.memory_profile["target_domain"] = {"value": "Resume Building", "confidence": "high"}
+        else:
+            session.memory_profile["target_domain"] = {"value": "Career Prep", "confidence": "high"}
+            
+    elif any(k in q for k in ["vtu", "certif", "stamp", "verify"]):
+        session.active_topic = "certifications"
+        session.active_intent = "COURSE_QUERY"
+        session.mode = "academic_mentor"
+        session.active_goal = "VTU Certification Stamp Verification"
+        session.memory_profile["target_domain"] = {"value": "VTU Certifications", "confidence": "high"}
+        
+    elif any(k in q for k in ["support", "help", "ticket", "login", "portal", "contact", "mail"]):
+        session.active_topic = "support"
+        session.active_intent = "COURSE_QUERY"
+        session.mode = "support_assistant"
+        session.active_goal = "LMS Portal & Ticket Support"
+        session.memory_profile["target_domain"] = {"value": "LMS Technical Support", "confidence": "high"}
+        
+    elif any(k in q for k in ["course", "syllabus", "react", "python", "java", "dsa", "programming", "code", "database", "sql"]):
+        session.active_topic = "courses"
+        session.active_intent = "COURSE_QUERY"
+        session.mode = "academic_mentor"
+        session.active_goal = "Master engineering curriculum & concepts"
+        
+        # Try to detect target domain from keywords
+        if "react" in q or "frontend" in q or "web" in q:
+            session.memory_profile["target_domain"] = {"value": "React / Web Dev", "confidence": "high"}
+            if "React JS" not in session.last_courses_discussed:
+                session.last_courses_discussed.append("React JS")
+        elif "python" in q:
+            session.memory_profile["target_domain"] = {"value": "Python Development", "confidence": "high"}
+            if "Python" not in session.last_courses_discussed:
+                session.last_courses_discussed.append("Python")
+        elif "java" in q:
+            session.memory_profile["target_domain"] = {"value": "Java Programming", "confidence": "high"}
+            if "Java" not in session.last_courses_discussed:
+                session.last_courses_discussed.append("Java")
+        elif "dsa" in q or "algorithm" in q or "tree" in q or "search" in q:
+            session.memory_profile["target_domain"] = {"value": "Data Structures & Algos", "confidence": "high"}
+            if "DSA" not in session.last_courses_discussed:
+                session.last_courses_discussed.append("DSA")
+        elif "sql" in q or "database" in q or "db" in q:
+            session.memory_profile["target_domain"] = {"value": "Database Management", "confidence": "high"}
+            if "SQL/DBMS" not in session.last_courses_discussed:
+                session.last_courses_discussed.append("SQL/DBMS")
+                
+    # Detect weak subject if user asks for explanation/help on difficult things
+    if any(k in q for k in ["confused", "stuck", "difficult", "hard", "help with", "explain", "don't understand"]):
+        if "dsa" in q or "algorithm" in q:
+            session.memory_profile["weak_subject"] = {"value": "Data Structures", "confidence": "high"}
+        elif "programming" in q or "coding" in q:
+            session.memory_profile["weak_subject"] = {"value": "Programming Basics", "confidence": "medium"}
+        elif "sql" in q or "database" in q:
+            session.memory_profile["weak_subject"] = {"value": "SQL Queries", "confidence": "high"}
+            
+    # Generate contextual recommendations based on active topic
+    session.recommendations = generate_recommendations(session.active_topic)
 
 # ── Educational Guardrail Layer ────────────────────────────────────────────────
 def is_educational_query(query: str) -> bool:
@@ -160,73 +274,6 @@ REJECTION_RESPONSE = (
     "Please let me know how I can help you with your academic or career development in engineering!"
 )
 
-# ── Enterprise Two-Stage Retrieval Pipeline ──────────────────────────────────
-def retrieve_and_rerank_chunks(query: str, intent: str, active_topic: str, debug: bool = True) -> tuple[list, float]:
-    """
-    Executes the entire enterprise-grade retrieve-filter-route-rerank pipeline.
-    Returns: (top_chunks, retrieval_confidence)
-    """
-    start_total = time.time()
-    
-    # 1. Broad Hybrid Retrieval (Dense Vector + Sparse Token-Overlap)
-    t0 = time.time()
-    hybrid_hits = hybrid_retriever.retrieve(query)
-    lat_hybrid = time.time() - t0
-    
-    # 2. Quality Filtering (repetition, short text, UI noise, Jaccard duplicates)
-    t0 = time.time()
-    from rag.retrieval_filter import filter_retrieved_chunks
-    quality_hits = filter_retrieved_chunks(hybrid_hits, similarity_threshold=0.75)
-    
-    if not quality_hits:
-        quality_hits = hybrid_hits
-    lat_filter = time.time() - t0
-        
-    # 3. Metadata Routing & Filtering based on Intent
-    t0 = time.time()
-    routed_hits = metadata_router.route_and_filter(quality_hits, intent)
-    lat_route = time.time() - t0
-    
-    # 4. Cross-Encoder Reranking and Retrieval Confidence Score Computation
-    t0 = time.time()
-    top_hits, confidence = reranker.rerank(query, routed_hits, top_n=3)
-    lat_rerank = time.time() - t0
-    
-    total_lat = time.time() - start_total
-    
-    logger.info(
-        f"Pipeline stats for query='{query[:30]}...' | "
-        f"hybrid={lat_hybrid:.4f}s ({len(hybrid_hits)} hits) | "
-        f"filter={lat_filter:.4f}s ({len(quality_hits)} hits) | "
-        f"route={lat_route:.4f}s ({len(routed_hits)} hits) | "
-        f"rerank={lat_rerank:.4f}s ({len(top_hits)} hits) | "
-        f"total={total_lat:.4f}s | confidence={confidence:.4f}"
-    )
-    
-    if debug:
-        print("\n=== ENTERPRISE RAG RETRIEVAL PIPELINE DEBUG ===")
-        print(f"Query: '{query}'")
-        print(f"Intent: {intent} | Active Topic: {active_topic}")
-        print(f"Raw Hybrid Hits: {len(hybrid_hits)}")
-        print(f"After Quality Filter: {len(quality_hits)}")
-        print(f"After Metadata Routing: {len(routed_hits)}")
-        print(f"Retrieval Confidence: {confidence:.4f}")
-        print("Reranked Chunks:")
-        for idx, h in enumerate(top_hits):
-            file_name = h.node.metadata.get("file_name", "")
-            excerpt = h.node.text.strip().replace('\n', ' ')[:80] + "..."
-            print(f"  [{idx + 1}] File: {file_name} | CrossEncoder Score: {h.score:.4f}")
-            print(f"      Excerpt: {excerpt}")
-        print("================================================\n")
-        
-    return top_hits, confidence
-
-def conversational_fallback(question: str) -> str:
-    # Basic backwards compatibility helper
-    hits, confidence = retrieve_and_rerank_chunks(question, "GENERAL", "general")
-    from rag.formatter import conversational_fallback as formatter_fallback
-    return formatter_fallback(question, hits)
-
 # ── Pydantic Request/Response Models ──────────────────────────────────────────
 class QueryRequest(BaseModel):
     question: str
@@ -263,193 +310,108 @@ class StateResponse(BaseModel):
 async def serve_ui():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
-# ── Stream Cleaning Layer ─────────────────────────────────────────────────────
-def clean_stream_generator(response_gen):
-    buffer = ""
-    prefix_stripped = False
-    
-    banned_prefixes = [
-        r"^based\s+on\s+(our|the|edutainer)\s+\w+\s+\w+,?\s*",
-        r"^according\s+to\s+(our|the|edutainer)\s+\w+\s+\w+,?\s*",
-        r"^based\s+on\s+the\s+provided\s+context,?\s*",
-        r"^according\s+to\s+the\s+documents,?\s*",
-        r"^based\s+on\s+our\s+knowledge\s+base,?\s*",
-        r"^retrieved\s+information:?\s*",
-        r"^q\s*:\s*",
-        r"^a\s*:\s*",
-        r"^question\s*:\s*",
-        r"^answer\s*:\s*"
-    ]
-    
-    for token in response_gen:
-        if not prefix_stripped:
-            buffer += token
-            if len(buffer) >= 100 or "\n" in buffer:
-                temp_buffer = buffer
-                for p in banned_prefixes:
-                    match = re.match(p, temp_buffer, re.IGNORECASE)
-                    if match:
-                        temp_buffer = temp_buffer[match.end():]
-                
-                temp_buffer = temp_buffer.lstrip()
-                if temp_buffer:
-                    temp_buffer = temp_buffer[0].upper() + temp_buffer[1:]
-                prefix_stripped = True
-                yield temp_buffer
-            continue
-        yield token
-
 @app.post("/query", response_model=QueryResponse)
 async def query_endpoint(req: QueryRequest):
     # 0. Input Validation
     q_stripped = req.question.strip()
+    session = get_or_create_session(req.session_id)
+    
     if not q_stripped:
-        session_id = req.session_id or "default"
-        session = get_or_create_session(session_id)
-        visual_profile = session["memory"].get_visual_profile()
         return QueryResponse(
             question=req.question,
             response="Query cannot be empty. Please ask a valid question.",
-            active_topic=session["state"].active_topic,
+            active_topic=session.active_topic,
             active_intent="INVALID_QUERY",
-            active_goal=session["state"].active_goal,
-            mode=session["state"].mode,
-            memory_profile=visual_profile,
-            recommendations=[],
+            active_goal=session.active_goal,
+            mode=session.mode,
+            memory_profile=session.memory_profile,
+            recommendations=session.recommendations,
             retrieval_confidence=0.0
         )
+        
     if len(req.question) > 1500:
-        session_id = req.session_id or "default"
-        session = get_or_create_session(session_id)
-        visual_profile = session["memory"].get_visual_profile()
         return QueryResponse(
             question=req.question,
             response="Query is too long (maximum 1500 characters). Please simplify your question.",
-            active_topic=session["state"].active_topic,
+            active_topic=session.active_topic,
             active_intent="INVALID_QUERY",
-            active_goal=session["state"].active_goal,
-            mode=session["state"].mode,
-            memory_profile=visual_profile,
-            recommendations=[],
+            active_goal=session.active_goal,
+            mode=session.mode,
+            memory_profile=session.memory_profile,
+            recommendations=session.recommendations,
             retrieval_confidence=0.0
         )
 
     # 1. Guardrail Check
     if not is_educational_query(req.question):
-        session_id = req.session_id or "default"
-        session = get_or_create_session(session_id)
-        visual_profile = session["memory"].get_visual_profile()
         return QueryResponse(
             question=req.question,
             response=REJECTION_RESPONSE,
-            active_topic=session["state"].active_topic,
+            active_topic=session.active_topic,
             active_intent="OUT_OF_SCOPE",
-            active_goal=session["state"].active_goal,
-            mode=session["state"].mode,
-            memory_profile=visual_profile,
-            recommendations=[],
+            active_goal=session.active_goal,
+            mode=session.mode,
+            memory_profile=session.memory_profile,
+            recommendations=session.recommendations,
             retrieval_confidence=0.0
         )
         
-    # 2. Retrieve session first to extract active semantic memory details
-    session_id = req.session_id or "default"
-    session = get_or_create_session(session_id)
-    state_obj = session["state"]
+    # 2. Update session state
+    update_session_state(session, req.question)
     
-    # 3. Preprocess & Expand Query (injecting active topic memory!)
-    from rag.preprocessor import preprocess_query
-    expanded_query = preprocess_query(
-        req.question, 
-        active_topic=state_obj.active_topic, 
-        last_courses=state_obj.last_courses_discussed
-    )
-        
-    chat_engine = session["chat_engine"]
-    
-    # 4. Classify intent
-    from rag.intent_router import classify_intent
-    llm = chat_engine._llm if chat_engine is not None else None
-    intent, score = classify_intent(expanded_query, llm)
-    
-    if intent == "OUT_OF_SCOPE":
-        rejection_msg = "I am designed specifically for educational and LMS-related assistance on the Edutainer platform. Please let me know how I can support you in these academic domains!"
-        visual_profile = session["memory"].get_visual_profile()
-        return QueryResponse(
-            question=req.question,
-            response=rejection_msg,
-            active_topic=state_obj.active_topic,
-            active_intent=intent,
-            active_goal=state_obj.active_goal,
-            mode=state_obj.mode,
-            memory_profile=visual_profile,
-            recommendations=[],
-            retrieval_confidence=0.0
-        )
-    
-    # 5. Update session state and memory
-    session["state"].update_state(req.question, intent, expanded_query)
-    session["memory"].extract_memories(req.question, intent, expanded_query)
-    
-    visual_profile = session["memory"].get_visual_profile()
-    matched_memory = session["memory"].retrieve_relevant_memories(expanded_query)
-    
-    # 6. Retrieve, Filter, Route, and Rerank chunks using two-stage pipeline
-    filtered_hits, confidence = retrieve_and_rerank_chunks(expanded_query, intent, state_obj.active_topic)
-
-    # 7. Generate contextual recommendations
-    from rag.recommendation import generate_recommendations
-    recommendations = generate_recommendations(intent, state_obj.active_topic, visual_profile)
-    
-    # 8. Process Response (synthesizing and cleaning)
-    if chat_engine is not None and check_ollama_running():
+    # 3. Query RAG engine
+    if query_engine is not None:
         try:
-            # Context synthesis layer for prompting LLM
-            synthesized_context = context_synthesizer.synthesize(expanded_query, filtered_hits)
-            contextual_query = req.question
-            if matched_memory or synthesized_context:
-                contextual_query = f"Synthesized Context:\n{synthesized_context}\n\n{matched_memory}\n\nStudent Query: {req.question}"
-                
-            response = chat_engine.chat(contextual_query)
-            cleaned_llm_response = response_cleaner.clean(str(response.response))
+            response_obj = query_engine.query(req.question)
+            response_text = str(response_obj)
+            
+            # Simple retrieval confidence calculation
+            confidence = 1.0
+            source_nodes = getattr(response_obj, "source_nodes", [])
+            if source_nodes:
+                # Average of top scores normalized (rough estimate)
+                scores = [nws.score for nws in source_nodes if nws.score is not None]
+                if scores:
+                    confidence = min(1.0, max(0.1, sum(scores) / len(scores) / 10.0))
+            
             return QueryResponse(
                 question=req.question,
-                response=cleaned_llm_response,
-                active_topic=state_obj.active_topic,
-                active_intent=intent,
-                active_goal=state_obj.active_goal,
-                mode=state_obj.mode,
-                memory_profile=visual_profile,
-                recommendations=recommendations,
+                response=response_text,
+                active_topic=session.active_topic,
+                active_intent=session.active_intent,
+                active_goal=session.active_goal,
+                mode=session.mode,
+                memory_profile=session.memory_profile,
+                recommendations=session.recommendations,
                 retrieval_confidence=confidence
             )
         except Exception as e:
-            print(f"Error during standard query chat: {e}")
+            logger.error(f"Error querying RAG engine: {e}")
             
-    # Fallback to local high-fidelity synthesized responses if offline
-    from rag.formatter import conversational_fallback as formatter_fallback
-    fallback_msg = formatter_fallback(req.question, filtered_hits)
-    cleaned_fallback = response_cleaner.clean(fallback_msg)
-    
+    # Offline or error fallback
     return QueryResponse(
         question=req.question,
-        response=cleaned_fallback,
-        active_topic=state_obj.active_topic,
-        active_intent=intent,
-        active_goal=state_obj.active_goal,
-        mode=state_obj.mode,
-        memory_profile=visual_profile,
-        recommendations=recommendations,
-        retrieval_confidence=confidence
+        response="I'm sorry, I encountered an issue querying the academic mentor database. Please try again later.",
+        active_topic=session.active_topic,
+        active_intent=session.active_intent,
+        active_goal=session.active_goal,
+        mode=session.mode,
+        memory_profile=session.memory_profile,
+        recommendations=session.recommendations,
+        retrieval_confidence=0.0
     )
 
 @app.post("/query/stream")
 async def query_stream_endpoint(req: QueryRequest):
     # 0. Input Validation
     q_stripped = req.question.strip()
+    session = get_or_create_session(req.session_id)
+    
     if not q_stripped:
         async def reject_generator():
             yield "Query cannot be empty. Please ask a valid question."
         return StreamingResponse(reject_generator(), media_type="text/event-stream")
+        
     if len(req.question) > 1500:
         async def reject_generator():
             yield "Query is too long (maximum 1500 characters). Please simplify your question."
@@ -461,111 +423,65 @@ async def query_stream_endpoint(req: QueryRequest):
             yield REJECTION_RESPONSE
         return StreamingResponse(reject_generator(), media_type="text/event-stream")
         
-    # 2. Retrieve session first to extract active semantic memory details
-    session_id = req.session_id or "default"
-    session = get_or_create_session(session_id)
-    state_obj = session["state"]
+    # 2. Update session state
+    update_session_state(session, req.question)
     
-    # 3. Preprocess & Expand Query (injecting active topic memory!)
-    from rag.preprocessor import preprocess_query
-    expanded_query = preprocess_query(
-        req.question, 
-        active_topic=state_obj.active_topic, 
-        last_courses=state_obj.last_courses_discussed
-    )
-    
-    chat_engine = session["chat_engine"]
-    
-    # 4. Classify intent
-    from rag.intent_router import classify_intent
-    llm = chat_engine._llm if chat_engine is not None else None
-    intent, score = classify_intent(expanded_query, llm)
-    
-    if intent == "OUT_OF_SCOPE":
-        rejection_msg = "I am designed specifically for educational and LMS-related assistance on the Edutainer platform. Please let me know how I can support you in these academic domains!"
-        async def reject_generator():
-            yield rejection_msg
-        return StreamingResponse(reject_generator(), media_type="text/event-stream")
-        
-    # 5. Update session state and memory
-    session["state"].update_state(req.question, intent, expanded_query)
-    session["memory"].extract_memories(req.question, intent, expanded_query)
-    
-    visual_profile = session["memory"].get_visual_profile()
-    matched_memory = session["memory"].retrieve_relevant_memories(expanded_query)
-    
-    # 6. Retrieve, Filter, Route, and Rerank chunks using two-stage pipeline
-    filtered_hits, confidence = retrieve_and_rerank_chunks(expanded_query, intent, state_obj.active_topic)
-
-    # 7. Stream response
-    if chat_engine is not None and check_ollama_running():
+    # 3. Get response from RAG engine
+    response_text = "I'm sorry, I encountered an issue querying the academic mentor database. Please try again later."
+    if query_engine is not None:
         try:
-            # Context synthesis layer for prompting LLM
-            synthesized_context = context_synthesizer.synthesize(expanded_query, filtered_hits)
-            contextual_query = req.question
-            if matched_memory or synthesized_context:
-                contextual_query = f"Synthesized Context:\n{synthesized_context}\n\n{matched_memory}\n\nStudent Query: {req.question}"
-                
-            response = chat_engine.stream_chat(contextual_query)
-            
-            async def event_generator():
-                for token in clean_stream_generator(response.response_gen):
-                    yield token
-            return StreamingResponse(event_generator(), media_type="text/event-stream")
+            response_obj = query_engine.query(req.question)
+            response_text = str(response_obj)
         except Exception as e:
-            print(f"Error during streaming query chat: {e}")
+            logger.error(f"Error querying RAG engine for stream: {e}")
             
-    # Fallback stream if offline
-    from rag.formatter import conversational_fallback as formatter_fallback
-    fallback_msg = formatter_fallback(req.question, filtered_hits)
-    cleaned_fallback = response_cleaner.clean(fallback_msg)
-    
-    async def fallback_generator():
-        yield cleaned_fallback
-    return StreamingResponse(fallback_generator(), media_type="text/event-stream")
+    # 4. Stream generator with small delay to simulate typing effect
+    async def event_generator():
+        # Yield in small chunks of words/tokens for smooth typing effect
+        words = re.findall(r'\S+\s*', response_text)
+        chunk = ""
+        for i, word in enumerate(words):
+            chunk += word
+            if i % 3 == 0 or i == len(words) - 1:
+                yield chunk
+                chunk = ""
+                await asyncio.sleep(0.02)
+                
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/clear")
 async def clear_endpoint(req: ClearRequest):
     if req.session_id in sessions:
-        if sessions[req.session_id]["chat_engine"] is not None:
-            try:
-                sessions[req.session_id]["chat_engine"].reset()
-            except Exception as e:
-                print(f"Error resetting chat engine: {e}")
-                
-        # Re-instantiate State and Memory to reset completely
-        from rag.conversation_state import ConversationState
-        from rag.memory import ContextMemory
-        sessions[req.session_id]["state"] = ConversationState(req.session_id)
-        sessions[req.session_id]["memory"] = ContextMemory(req.session_id)
-        
+        del sessions[req.session_id]
     return {"status": "cleared"}
 
 @app.get("/state/{session_id}", response_model=StateResponse)
 async def state_endpoint(session_id: str):
     session = get_or_create_session(session_id)
-    s = session["state"]
-    m = session["memory"]
-    
-    from rag.recommendation import generate_recommendations
-    recommendations = generate_recommendations(s.active_intent, s.active_topic, m.get_visual_profile())
-    
     return StateResponse(
-        session_id=session_id,
-        active_topic=s.active_topic,
-        active_intent=s.active_intent,
-        workflow=s.workflow,
-        mode=s.mode,
-        last_courses_discussed=s.last_courses_discussed,
-        active_goal=s.active_goal,
-        memory_profile=m.get_visual_profile(),
-        recommendations=recommendations,
+        session_id=session.session_id,
+        active_topic=session.active_topic,
+        active_intent=session.active_intent,
+        workflow=session.workflow,
+        mode=session.mode,
+        last_courses_discussed=session.last_courses_discussed,
+        active_goal=session.active_goal,
+        memory_profile=session.memory_profile,
+        recommendations=session.recommendations,
         retrieval_confidence=1.0
     )
 
 @app.get("/api/stats")
 async def stats_endpoint():
     try:
+        from rag.database.chroma_manager import ChromaManager
+        chroma_manager = ChromaManager(
+            persist_dir=CHROMA_PERSIST_DIR,
+            collection_name=CHROMA_COLLECTION_NAME
+        )
+        collection = chroma_manager.get_collection()
+        total_chunks = collection.count()
+        
         # Get all metadatas to analyze
         data = collection.get(include=["metadatas"])
         metadatas = data.get("metadatas", [])
@@ -578,7 +494,7 @@ async def stats_endpoint():
                 file_counts[file_name] = file_counts.get(file_name, 0) + 1
                 
         return {
-            "total_chunks": collection.count(),
+            "total_chunks": total_chunks,
             "distinct_sources": len(file_counts),
             "sources": file_counts
         }
@@ -587,4 +503,21 @@ async def stats_endpoint():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "chunks_indexed": collection.count(), "ollama_online": check_ollama_running()}
+    ollama_ok = check_ollama_active()
+    chunks_count = 0
+    if query_engine is not None:
+        try:
+            from rag.database.chroma_manager import ChromaManager
+            chroma_manager = ChromaManager(
+                persist_dir=CHROMA_PERSIST_DIR,
+                collection_name=CHROMA_COLLECTION_NAME
+            )
+            chunks_count = chroma_manager.get_collection().count()
+        except Exception:
+            chunks_count = 0
+            
+    return {
+        "status": "ok",
+        "chunks_indexed": chunks_count,
+        "ollama_online": ollama_ok
+    }
