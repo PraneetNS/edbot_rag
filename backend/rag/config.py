@@ -5,12 +5,14 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 WORKSPACE_DIR = BASE_DIR.parent
 
-# Input Dataset Path
-DATASET_PATH = WORKSPACE_DIR / "edumentor_ultra_premium_final.jsonl"
+# Input Dataset Paths
+DATASET_PATH     = WORKSPACE_DIR / "edumentor_ultra_premium_final.jsonl"
+DATASET_5K_PATH  = WORKSPACE_DIR / "edumentor_synthetic_5k.jsonl"
 
 # Chroma Database Settings
-CHROMA_PERSIST_DIR = WORKSPACE_DIR / "chroma_db"
-CHROMA_COLLECTION_NAME = "edumentor_knowledge"
+CHROMA_PERSIST_DIR      = WORKSPACE_DIR / "chroma_db"
+CHROMA_COLLECTION_NAME  = "edumentor_knowledge"     # existing ultra-premium dataset
+CHROMA_COLLECTION_5K    = "edumentor_5k"            # synthetic 5k dataset
 
 # Embedding Model (Sentence Transformers)
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
