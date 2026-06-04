@@ -5,7 +5,16 @@ selenium
 webdriver-manager
 chromadb
 sentence-transformers
+numpy
+fastapi
+uvicorn[standard]
 llama-index
 llama-index-vector-stores-chroma
 llama-index-embeddings-huggingface
 llama-index-llms-ollama
+llama-index-postprocessor-flag-embedding-reranker
+# Edmentor additions
+groq
+python-dotenv
+kokoro-onnx
+soundfile
