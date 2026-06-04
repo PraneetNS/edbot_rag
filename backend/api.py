@@ -1,9 +1,23 @@
 from pathlib import Path
 import sys
+import os
 import time
 import re
 import asyncio
+import logging
 from typing import Generator
+
+# Force HuggingFace to offline mode to avoid remote check delays/timeouts
+os.environ["HF_HUB_OFFLINE"] = "1"
+
+# Fix Windows cp1252 console encoding (crashes on ✓ ✗ chars without this)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
+logger = logging.getLogger("api")
+
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -13,8 +27,31 @@ from pydantic import BaseModel
 # Allow imports from backend root
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from rag.retrieval.retriever import load_rag_index, get_edumentor_query_engine, check_ollama_active
-from rag.config import CHROMA_PERSIST_DIR, CHROMA_COLLECTION_NAME
+from rag.retrieval.retriever import (
+    load_rag_index,
+    get_edumentor_query_engine,
+    load_rag_index_5k,
+    get_edumentor_query_engine_5k,
+    check_ollama_active,
+    retrieve_chunks_for_edmentor,
+)
+from rag.config import CHROMA_PERSIST_DIR, CHROMA_COLLECTION_NAME, CHROMA_COLLECTION_5K
+
+# ── Edmentor voice-mentor components (lazy load) ──────────────────────────────
+try:
+    from edmentor.guard import guard as edmentor_guard
+    from edmentor.voice_limit import enforce_voice_limit, speaking_duration_label
+    from edmentor.topic_classifier import EdmentorTopicClassifier
+    from edmentor.memory import memory as edmentor_memory
+    from edmentor.prompt import build_messages
+    from edmentor.groq_client import llm as edmentor_llm
+    from edmentor.tts_router import tts_router
+    _EDMENTOR_READY = True
+except Exception as _e:
+    logger_tmp = __import__('logging').getLogger('api')
+    logger_tmp.warning(f"Edmentor components not fully loaded: {_e}")
+    _EDMENTOR_READY = False
+    tts_router = None
 
 # Setup base paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,16 +74,41 @@ app = FastAPI(title="EduBot RAG API")
 STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Register Edmentor TTS router if available
+if tts_router is not None:
+    app.include_router(tts_router)
+
 # ── Load index and query engine once at startup ──────────────────────────────
-print("Loading RAG index and query engine...")
+print("Loading RAG indexes and query engines ...")
+
+# Primary: ultra-premium dataset
 try:
     index = load_rag_index()
     query_engine = get_edumentor_query_engine(index)
-    print("EduBot Modernized RAG API ready.")
+    print("  ✓ Primary (ultra-premium) EduBot RAG engine ready.")
 except Exception as e:
-    print(f"Error loading database index or query engine: {e}")
+    print(f"  ✗ Primary engine failed: {e}")
     index = None
     query_engine = None
+
+# Secondary: synthetic 5k dataset
+try:
+    index_5k = load_rag_index_5k()
+    query_engine_5k = get_edumentor_query_engine_5k(index_5k)
+    print("  ✓ Edumentor 5k RAG engine ready.")
+except Exception as e:
+    print(f"  ✗ 5k engine not available (run build_index_5k.py first): {e}")
+    index_5k = None
+    query_engine_5k = None
+
+# Edmentor topic classifier (shares MiniLM embed model — no extra memory cost)
+edmentor_topic_classifier = None
+if _EDMENTOR_READY:
+    try:
+        edmentor_topic_classifier = EdmentorTopicClassifier()
+        print("  ✓ Edmentor topic classifier ready.")
+    except Exception as e:
+        print(f"  ✗ Edmentor topic classifier failed: {e}")
 
 # ── Session Storage and State Management ─────────────────────────────────────
 class SessionState:
@@ -455,6 +517,72 @@ async def clear_endpoint(req: ClearRequest):
         del sessions[req.session_id]
     return {"status": "cleared"}
 
+
+# ── Edumentor 5k Query Endpoint ──────────────────────────────────────────
+@app.post("/query/5k", response_model=QueryResponse)
+async def query_5k_endpoint(req: QueryRequest):
+    """
+    RAG query endpoint backed by the deduplicated edumentor_synthetic_5k dataset.
+    Useful for comparing answer quality against the /query (ultra-premium) endpoint.
+    """
+    q_stripped = req.question.strip()
+    session    = get_or_create_session(req.session_id)
+
+    if not q_stripped:
+        return QueryResponse(
+            question=req.question,
+            response="Query cannot be empty. Please ask a valid question.",
+            active_topic=session.active_topic, active_intent="INVALID_QUERY",
+            active_goal=session.active_goal, mode=session.mode,
+            memory_profile=session.memory_profile, recommendations=session.recommendations,
+            retrieval_confidence=0.0,
+        )
+
+    if not is_educational_query(req.question):
+        return QueryResponse(
+            question=req.question, response=REJECTION_RESPONSE,
+            active_topic=session.active_topic, active_intent="OUT_OF_SCOPE",
+            active_goal=session.active_goal, mode=session.mode,
+            memory_profile=session.memory_profile, recommendations=session.recommendations,
+            retrieval_confidence=0.0,
+        )
+
+    update_session_state(session, req.question)
+
+    if query_engine_5k is None:
+        return QueryResponse(
+            question=req.question,
+            response="The 5k knowledge base is not yet indexed. Run `build_index_5k.py` first.",
+            active_topic=session.active_topic, active_intent=session.active_intent,
+            active_goal=session.active_goal, mode=session.mode,
+            memory_profile=session.memory_profile, recommendations=session.recommendations,
+            retrieval_confidence=0.0,
+        )
+
+    try:
+        response_obj  = query_engine_5k.query(req.question)
+        response_text = str(response_obj)
+        source_nodes  = getattr(response_obj, "source_nodes", [])
+        scores = [n.score for n in source_nodes if n.score is not None]
+        confidence = min(1.0, max(0.1, sum(scores) / len(scores) / 10.0)) if scores else 1.0
+        return QueryResponse(
+            question=req.question, response=response_text,
+            active_topic=session.active_topic, active_intent=session.active_intent,
+            active_goal=session.active_goal, mode=session.mode,
+            memory_profile=session.memory_profile, recommendations=session.recommendations,
+            retrieval_confidence=confidence,
+        )
+    except Exception as e:
+        logger.error(f"Error querying 5k RAG engine: {e}")
+        return QueryResponse(
+            question=req.question,
+            response="An error occurred while querying the 5k knowledge base.",
+            active_topic=session.active_topic, active_intent=session.active_intent,
+            active_goal=session.active_goal, mode=session.mode,
+            memory_profile=session.memory_profile, recommendations=session.recommendations,
+            retrieval_confidence=0.0,
+        )
+
 @app.get("/state/{session_id}", response_model=StateResponse)
 async def state_endpoint(session_id: str):
     session = get_or_create_session(session_id)
@@ -473,51 +601,225 @@ async def state_endpoint(session_id: str):
 
 @app.get("/api/stats")
 async def stats_endpoint():
-    try:
-        from rag.database.chroma_manager import ChromaManager
-        chroma_manager = ChromaManager(
-            persist_dir=CHROMA_PERSIST_DIR,
-            collection_name=CHROMA_COLLECTION_NAME
-        )
-        collection = chroma_manager.get_collection()
-        total_chunks = collection.count()
-        
-        # Get all metadatas to analyze
-        data = collection.get(include=["metadatas"])
-        metadatas = data.get("metadatas", [])
-        
-        # Count chunks by file_name
-        file_counts = {}
-        for meta in metadatas:
-            if meta:
-                file_name = meta.get("file_name", "unknown")
-                file_counts[file_name] = file_counts.get(file_name, 0) + 1
-                
-        return {
-            "total_chunks": total_chunks,
-            "distinct_sources": len(file_counts),
-            "sources": file_counts
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    from rag.database.chroma_manager import ChromaManager
+
+    def _collection_stats(collection_name: str) -> dict:
+        try:
+            mgr = ChromaManager(persist_dir=CHROMA_PERSIST_DIR, collection_name=collection_name)
+            col = mgr.get_collection()
+            total = col.count()
+            data  = col.get(include=["metadatas"])
+            topic_counts: dict = {}
+            for meta in (data.get("metadatas") or []):
+                if meta:
+                    t = meta.get("topic", "unknown")
+                    topic_counts[t] = topic_counts.get(t, 0) + 1
+            return {"total_chunks": total, "topics": topic_counts}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return {
+        "primary_collection":  {"name": CHROMA_COLLECTION_NAME,  **_collection_stats(CHROMA_COLLECTION_NAME)},
+        "edumentor_5k":        {"name": CHROMA_COLLECTION_5K,     **_collection_stats(CHROMA_COLLECTION_5K)},
+    }
 
 @app.get("/health")
 async def health():
+    from rag.database.chroma_manager import ChromaManager
     ollama_ok = check_ollama_active()
-    chunks_count = 0
-    if query_engine is not None:
+
+    def _chunk_count(collection_name: str) -> int:
         try:
-            from rag.database.chroma_manager import ChromaManager
-            chroma_manager = ChromaManager(
-                persist_dir=CHROMA_PERSIST_DIR,
-                collection_name=CHROMA_COLLECTION_NAME
-            )
-            chunks_count = chroma_manager.get_collection().count()
+            return ChromaManager(
+                persist_dir=CHROMA_PERSIST_DIR, collection_name=collection_name
+            ).get_collection().count()
         except Exception:
-            chunks_count = 0
-            
+            return 0
+
     return {
-        "status": "ok",
-        "chunks_indexed": chunks_count,
-        "ollama_online": ollama_ok
+        "status":                "ok",
+        "ollama_online":         ollama_ok,
+        "primary_engine_ready": query_engine is not None,
+        "5k_engine_ready":       query_engine_5k is not None,
+        "primary_chunks":        _chunk_count(CHROMA_COLLECTION_NAME),
+        "5k_chunks":             _chunk_count(CHROMA_COLLECTION_5K),
+        "edmentor_ready":        _EDMENTOR_READY and edmentor_topic_classifier is not None,
+        "edmentor_llm":          edmentor_llm.status() if _EDMENTOR_READY else {},
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  EDMENTOR ENDPOINTS
+#  Voice-first engineering mentor persona with:
+#    ① Domain guard (before any RAG/LLM)
+#    ② Centroid-cosine topic classifier (~10ms)
+#    ③ Topic-filtered ChromaDB retrieval
+#    ④ Last-2-turn conversation history
+#    ⑤ Groq LLM (primary) with Ollama fallback
+#    ⑥ Hard 80-word voice limit enforcement
+# ══════════════════════════════════════════════════════════════════════════════
+
+class EdmentorRequest(BaseModel):
+    question: str
+    session_id: str = "default"
+
+class EdmentorResponse(BaseModel):
+    response: str
+    topic: str
+    speaking_duration: str
+    word_count: int
+    groq_used: bool
+
+
+def _edmentor_not_ready_response(question: str) -> EdmentorResponse:
+    msg = (
+        "I am having a startup issue right now. That is on me. "
+        "Give me a moment and try again."
+    )
+    return EdmentorResponse(
+        response=msg, topic="general",
+        speaking_duration="~4s", word_count=len(msg.split()), groq_used=False,
+    )
+
+
+@app.post("/edmentor/query", response_model=EdmentorResponse)
+async def edmentor_query(req: EdmentorRequest):
+    """
+    Edmentor voice mentor query endpoint.
+
+    Pipeline:
+        ① Domain guard — rejects out-of-scope before any RAG
+        ② Topic classify — centroid cosine, ~10ms
+        ③ RAG retrieve — topic-filtered ChromaDB top-3 chunks
+        ④ History — last 2 turns prepended to Groq messages
+        ⑤ LLM — Groq primary, Ollama fallback
+        ⑥ Voice limit — hard 80-word truncation + markdown strip
+    """
+    if not _EDMENTOR_READY or edmentor_topic_classifier is None:
+        return _edmentor_not_ready_response(req.question)
+
+    q = req.question.strip()
+    if not q:
+        return EdmentorResponse(
+            response="I did not catch that. Ask me again.",
+            topic="general", speaking_duration="~2s", word_count=6, groq_used=False,
+        )
+
+    # ① GATE: Domain boundary check (before ANY retrieval)
+    is_blocked, guard_response, reason = edmentor_guard.check(q)
+    if is_blocked:
+        clean = enforce_voice_limit(guard_response)
+        return EdmentorResponse(
+            response=clean,
+            topic="general",
+            speaking_duration=speaking_duration_label(clean),
+            word_count=len(clean.split()),
+            groq_used=False,
+        )
+
+    # ② Topic classify
+    topic = edmentor_topic_classifier.classify(q)
+
+    # ③ RAG retrieve (topic-filtered)
+    try:
+        chunks = retrieve_chunks_for_edmentor(q, topic=topic, top_k=3)
+    except Exception as e:
+        logger.warning(f"Edmentor retrieval failed: {e}")
+        chunks = []
+
+    # ④ Build messages (system + last-2-turns history + RAG context)
+    history = edmentor_memory.get_last_turns(req.session_id, n=2)
+    messages = build_messages(history=history, chunks=chunks, question=q)
+
+    # ⑤ LLM call (Groq primary → Ollama fallback)
+    groq_used = edmentor_llm.groq.is_available
+    raw_response = await edmentor_llm.chat(messages)
+
+    # ⑥ Hard 80-word enforcement
+    final_response = enforce_voice_limit(raw_response, max_words=80)
+
+    # Save this turn to memory
+    edmentor_memory.save_turn(req.session_id, q, final_response)
+
+    return EdmentorResponse(
+        response=final_response,
+        topic=topic,
+        speaking_duration=speaking_duration_label(final_response),
+        word_count=len(final_response.split()),
+        groq_used=groq_used,
+    )
+
+
+@app.post("/edmentor/query/stream")
+async def edmentor_query_stream(req: EdmentorRequest):
+    """
+    Streaming variant of /edmentor/query.
+    Streams tokens as SSE for real-time chat display and TTS.
+    The full response is word-limit enforced AFTER streaming completes.
+    """
+    if not _EDMENTOR_READY or edmentor_topic_classifier is None:
+        async def _not_ready():
+            yield _edmentor_not_ready_response(req.question).response
+        return StreamingResponse(_not_ready(), media_type="text/event-stream")
+
+    q = req.question.strip()
+    if not q:
+        async def _empty():
+            yield "I did not catch that. Ask me again."
+        return StreamingResponse(_empty(), media_type="text/event-stream")
+
+    # ① Domain guard
+    is_blocked, guard_response, _ = edmentor_guard.check(q)
+    if is_blocked:
+        clean = enforce_voice_limit(guard_response)
+        async def _guard_reject():
+            yield clean
+        return StreamingResponse(_guard_reject(), media_type="text/event-stream")
+
+    # ② Topic classify
+    topic = edmentor_topic_classifier.classify(q)
+
+    # ③ RAG retrieve
+    try:
+        chunks = retrieve_chunks_for_edmentor(q, topic=topic, top_k=3)
+    except Exception as e:
+        logger.warning(f"Edmentor stream retrieval failed: {e}")
+        chunks = []
+
+    # ④ Build messages
+    history = edmentor_memory.get_last_turns(req.session_id, n=2)
+    messages = build_messages(history=history, chunks=chunks, question=q)
+
+    # ⑤ Stream tokens — collect full response for memory save
+    collected = []
+
+    async def token_generator():
+        async for token in edmentor_llm.chat_stream(messages):
+            collected.append(token)
+            yield token
+        # After stream ends, enforce limit and save to memory
+        full_response = enforce_voice_limit("".join(collected), max_words=80)
+        edmentor_memory.save_turn(req.session_id, q, full_response)
+
+    return StreamingResponse(token_generator(), media_type="text/event-stream")
+
+
+@app.delete("/edmentor/session/{session_id}")
+async def edmentor_clear_session(session_id: str):
+    """Clear Edmentor conversation history for a session."""
+    if _EDMENTOR_READY:
+        edmentor_memory.clear_session(session_id)
+    return {"status": "cleared", "session_id": session_id}
+
+
+@app.get("/edmentor/health")
+async def edmentor_health():
+    """Edmentor-specific health check."""
+    if not _EDMENTOR_READY:
+        return {"ready": False, "reason": "components_not_loaded"}
+    return {
+        "ready": True,
+        "topic_classifier": edmentor_topic_classifier is not None,
+        **edmentor_llm.status(),
+    }
+
