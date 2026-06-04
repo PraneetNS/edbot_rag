@@ -58,3 +58,13 @@ class ChromaManager:
         if self.collection is None:
             self.initialize_db()
         return ChromaVectorStore(chroma_collection=self.collection)
+
+    def get_collection(self):
+        """
+        Returns the raw ChromaDB collection object.
+        Useful for administrative operations like count(), get(), etc.
+        """
+        if self.collection is None:
+            self.initialize_db()
+        return self.collection
+
