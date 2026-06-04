@@ -25,4 +25,9 @@ chroma_db/
 *.jsonl
 *.log
 
+# Local environment variables
+.env
+backend/.env
+test_audio.mp3
+backend/test_audio.mp3
 
