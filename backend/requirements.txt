@@ -16,5 +16,3 @@ llama-index-postprocessor-flag-embedding-reranker
 # Edmentor additions
 groq
 python-dotenv
-kokoro-onnx
-soundfile
