@@ -31,3 +31,12 @@ backend/.env
 test_audio.mp3
 backend/test_audio.mp3
 
+# Local model binaries
+backend/*.onnx
+backend/*.bin
+
+# Local databases
+edumentor_chroma/
+
+# Generated documents
+rag_docs.json
