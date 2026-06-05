@@ -46,6 +46,12 @@ try:
     from edmentor.prompt import build_messages
     from edmentor.groq_client import llm as edmentor_llm
     from edmentor.tts_router import tts_router
+    
+    # Imports for confidence routing architecture
+    from edmentor.intent_router import is_off_domain
+    from edmentor.confidence_router import generate_response_with_routing, USE_LOCAL_MODEL
+    from edmentor.safety_filter import edumentor_filter
+    
     _EDMENTOR_READY = True
 except Exception as _e:
     logger_tmp = __import__('logging').getLogger('api')
@@ -686,14 +692,7 @@ def _edmentor_not_ready_response(question: str) -> EdmentorResponse:
 async def edmentor_query(req: EdmentorRequest):
     """
     Edmentor voice mentor query endpoint.
-
-    Pipeline:
-        ① Domain guard — rejects out-of-scope before any RAG
-        ② Topic classify — centroid cosine, ~10ms
-        ③ RAG retrieve — topic-filtered ChromaDB top-3 chunks
-        ④ History — last 2 turns prepended to Groq messages
-        ⑤ LLM — Groq primary, Ollama fallback
-        ⑥ Voice limit — hard 80-word truncation + markdown strip
+    Uses confidence-based routing and safety filtering.
     """
     if not _EDMENTOR_READY or edmentor_topic_classifier is None:
         return _edmentor_not_ready_response(req.question)
@@ -705,41 +704,46 @@ async def edmentor_query(req: EdmentorRequest):
             topic="general", speaking_duration="~2s", word_count=6, groq_used=False,
         )
 
-    # ① GATE: Domain boundary check (before ANY retrieval)
+    # 1. Intent check / domain guard
+    # We first run the standard check to capture character locks/identity responses
     is_blocked, guard_response, reason = edmentor_guard.check(q)
     if is_blocked:
-        clean = enforce_voice_limit(guard_response)
+        if reason in ("identity", "character_lock"):
+            final_response = edumentor_filter(guard_response)
+        else:
+            final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
+            
         return EdmentorResponse(
-            response=clean,
+            response=final_response,
             topic="general",
-            speaking_duration=speaking_duration_label(clean),
-            word_count=len(clean.split()),
+            speaking_duration=speaking_duration_label(final_response),
+            word_count=len(final_response.split()),
             groq_used=False,
         )
 
-    # ② Topic classify
+    if is_off_domain(q):
+        final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
+        return EdmentorResponse(
+            response=final_response,
+            topic="general",
+            speaking_duration=speaking_duration_label(final_response),
+            word_count=len(final_response.split()),
+            groq_used=False,
+        )
+
+    # 2. Topic classify (for metadata response/UI)
     topic = edmentor_topic_classifier.classify(q)
 
-    # ③ RAG retrieve (topic-filtered)
-    try:
-        chunks = retrieve_chunks_for_edmentor(q, topic=topic, top_k=3)
-    except Exception as e:
-        logger.warning(f"Edmentor retrieval failed: {e}")
-        chunks = []
+    # 3. LLM generation with confidence routing (local vs interim Groq)
+    response_raw, routing_mode = await generate_response_with_routing(q, req.session_id)
 
-    # ④ Build messages (system + last-2-turns history + RAG context)
-    history = edmentor_memory.get_last_turns(req.session_id, n=2)
-    messages = build_messages(history=history, chunks=chunks, question=q)
+    # 4. Safety filter & 250-word sentence boundary truncation
+    final_response = edumentor_filter(response_raw)
 
-    # ⑤ LLM call (Groq primary → Ollama fallback)
-    groq_used = edmentor_llm.groq.is_available
-    raw_response = await edmentor_llm.chat(messages)
-
-    # ⑥ Hard 80-word enforcement
-    final_response = enforce_voice_limit(raw_response, max_words=80)
-
-    # Save this turn to memory
+    # Save turn to memory
     edmentor_memory.save_turn(req.session_id, q, final_response)
+
+    groq_used = "groq_interim" in routing_mode
 
     return EdmentorResponse(
         response=final_response,
@@ -753,9 +757,8 @@ async def edmentor_query(req: EdmentorRequest):
 @app.post("/edmentor/query/stream")
 async def edmentor_query_stream(req: EdmentorRequest):
     """
-    Streaming variant of /edmentor/query.
-    Streams tokens as SSE for real-time chat display and TTS.
-    The full response is word-limit enforced AFTER streaming completes.
+    Streaming variant of /edmentor/query using confidence-based routing.
+    Streams final safety-filtered text.
     """
     if not _EDMENTOR_READY or edmentor_topic_classifier is None:
         async def _not_ready():
@@ -768,38 +771,37 @@ async def edmentor_query_stream(req: EdmentorRequest):
             yield "I did not catch that. Ask me again."
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
-    # ① Domain guard
-    is_blocked, guard_response, _ = edmentor_guard.check(q)
+    # 1. Intent check / domain guard
+    is_blocked, guard_response, reason = edmentor_guard.check(q)
     if is_blocked:
-        clean = enforce_voice_limit(guard_response)
+        if reason in ("identity", "character_lock"):
+            final_response = edumentor_filter(guard_response)
+        else:
+            final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
+            
         async def _guard_reject():
-            yield clean
+            yield final_response
         return StreamingResponse(_guard_reject(), media_type="text/event-stream")
 
-    # ② Topic classify
-    topic = edmentor_topic_classifier.classify(q)
+    if is_off_domain(q):
+        final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
+        async def _intent_reject():
+            yield final_response
+        return StreamingResponse(_intent_reject(), media_type="text/event-stream")
 
-    # ③ RAG retrieve
-    try:
-        chunks = retrieve_chunks_for_edmentor(q, topic=topic, top_k=3)
-    except Exception as e:
-        logger.warning(f"Edmentor stream retrieval failed: {e}")
-        chunks = []
+    # 2. Generate response with confidence routing
+    response_raw, routing_mode = await generate_response_with_routing(q, req.session_id)
+    final_response = edumentor_filter(response_raw)
 
-    # ④ Build messages
-    history = edmentor_memory.get_last_turns(req.session_id, n=2)
-    messages = build_messages(history=history, chunks=chunks, question=q)
-
-    # ⑤ Stream tokens — collect full response for memory save
-    collected = []
+    # Save to memory
+    edmentor_memory.save_turn(req.session_id, q, final_response)
 
     async def token_generator():
-        async for token in edmentor_llm.chat_stream(messages):
-            collected.append(token)
-            yield token
-        # After stream ends, enforce limit and save to memory
-        full_response = enforce_voice_limit("".join(collected), max_words=80)
-        edmentor_memory.save_turn(req.session_id, q, full_response)
+        # Stream word-by-word with a very short sleep for typing effect
+        words = re.findall(r'\S+\s*', final_response)
+        for w in words:
+            yield w
+            await asyncio.sleep(0.01)
 
     return StreamingResponse(token_generator(), media_type="text/event-stream")
 
