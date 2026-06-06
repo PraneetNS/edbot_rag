@@ -1,11 +1,11 @@
 import re
 
-def edumentor_filter(text: str) -> str:
+def edumentor_filter(text: str, max_words: int = 250) -> str:
     """
     Cleans response text for natural voice synthesis:
     - Strips markdown formatting (headers, lists, bold).
     - Removes common AI filler words.
-    - Limits response length to 250 words, cutting strictly at the last complete sentence boundary.
+    - Limits response length to max_words, cutting strictly at the last complete sentence boundary.
     """
     if not text:
         return ""
@@ -29,9 +29,9 @@ def edumentor_filter(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     text = re.sub(r'^[,\s.!?]+', '', text).strip()
     
-    # Truncate at 250 words, cutting at the last complete sentence boundary
+    # Truncate at max_words, cutting at the last complete sentence boundary
     words = text.split()
-    if len(words) <= 250:
+    if len(words) <= max_words:
         return text.strip()
         
     # Split text into sentences using lookbehind to preserve sentence termination marks
@@ -44,7 +44,7 @@ def edumentor_filter(text: str) -> str:
         sentence_words = sentence.split()
         if not sentence_words:
             continue
-        if current_word_count + len(sentence_words) <= 250:
+        if current_word_count + len(sentence_words) <= max_words:
             accumulated_sentences.append(sentence)
             current_word_count += len(sentence_words)
         else:
@@ -53,7 +53,7 @@ def edumentor_filter(text: str) -> str:
     if accumulated_sentences:
         text = " ".join(accumulated_sentences)
     else:
-        # Last-resort fallback: truncate at exactly 250 words if the first sentence exceeds the limit
-        text = " ".join(words[:250]) + "."
+        # Last-resort fallback: truncate at exactly max_words if the first sentence exceeds the limit
+        text = " ".join(words[:max_words]) + "."
         
     return text.strip()
