@@ -40,8 +40,14 @@ def _try_kokoro(text: str, voice: str, speed: float):
         from kokoro_onnx import Kokoro
         import soundfile as sf
         import numpy as np
+        from pathlib import Path
 
-        kokoro = Kokoro("kokoro-v1_0.onnx", "voices-v1_0.bin")
+        # Resolve paths dynamically relative to the backend directory
+        backend_dir = Path(__file__).resolve().parent.parent
+        model_path = str(backend_dir / "kokoro-v1_0.onnx")
+        voices_path = str(backend_dir / "voices-v1_0.bin")
+
+        kokoro = Kokoro(model_path, voices_path)
         samples, sample_rate = kokoro.create(text, voice=voice, speed=speed, lang="en-us")
 
         buf = io.BytesIO()
