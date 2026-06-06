@@ -88,6 +88,18 @@ if tts_router is not None:
 async def startup_event():
     asyncio.create_task(cleanup_stale_sessions_periodically())
 
+@app.middleware("http")
+async def log_requests_middleware(request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    logger.info(
+        f"Request: {request.method} {request.url.path} - "
+        f"Status: {response.status_code} - "
+        f"Duration: {process_time:.4f}s"
+    )
+    return response
+
 # ── Load index and query engine once at startup ──────────────────────────────
 print("Loading RAG indexes and query engines ...")
 
@@ -476,6 +488,11 @@ async def query_endpoint(req: QueryRequest):
                 if scores:
                     confidence = min(1.0, max(0.1, sum(scores) / len(scores) / 10.0))
             
+            logger.info(
+                f"[RAG Query] Session: {req.session_id} | "
+                f"Topic: {session.active_topic} | Intent: {session.active_intent} | "
+                f"Confidence: {confidence:.4f}"
+            )
             return QueryResponse(
                 question=req.question,
                 response=response_text,
@@ -778,6 +795,12 @@ async def edmentor_query(req: EdmentorRequest):
     edmentor_memory.save_turn(req.session_id, q, final_response)
 
     groq_used = "groq_interim" in routing_mode
+
+    logger.info(
+        f"[Edmentor Query] Session: {req.session_id} | "
+        f"Topic: {topic} | Routing: {routing_mode} | "
+        f"Words: {len(final_response.split())}"
+    )
 
     return EdmentorResponse(
         response=final_response,
