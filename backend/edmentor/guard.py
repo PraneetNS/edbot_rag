@@ -95,16 +95,16 @@ _IN_SCOPE_KEYWORDS = [
     "programming", "coding", "code", "software", "developer", "development",
     "project", "github", "git", "open source", "contribution", "pull request",
     "machine learning", "ml", "deep learning", "nlp", "ai", "neural network",
-    "cloud", "aws", "gcp", "azure", "docker", "kubernetes",
-    "web", "react", "html", "css", "node", "backend", "frontend", "api",
-    "database", "sql", "mongodb", "postgres", "nosql",
-    "system design", "os", "operating system", "network", "computer science",
-    "research", "paper", "phd", "masters", "gate", "higher studies",
-    "college", "engineering", "semester", "cgpa", "gpa", "study", "learn",
-    "edmentor", "mentor", "hello", "hi", "hey", "help",
-    "what", "how", "why", "when", "can you", "explain", "tell me", "guide",
-    "roadmap", "plan", "prepare", "practice", "competitive programming",
-    "leetcode", "codeforces", "hackerrank", "cp",
+    "cloud", "aws", "gcp", "azure", "docker", "kubernetes", "jenkins", "ci/cd",
+    "continuous integration", "continuous deployment", "terraform", "ansible",
+    "nginx", "rest api", "graphql", "microservices", "agile", "scrum", "sdlc",
+    "unit testing", "integration testing", "system design", "os", "operating system",
+    "network", "computer science", "research", "paper", "phd", "masters", "gate",
+    "higher studies", "college", "engineering", "semester", "cgpa", "gpa", "study",
+    "learn", "edmentor", "mentor", "hello", "hi", "hey", "help", "what", "how",
+    "why", "when", "can you", "explain", "tell me", "guide", "roadmap", "plan",
+    "prepare", "practice", "competitive programming", "leetcode", "codeforces",
+    "hackerrank", "cp",
 ]
 
 
@@ -121,28 +121,32 @@ class DomainGuard:
         q = query.strip()
         q_lower = q.lower()
 
+        # Normalize spaces and strip trailing punctuation for robust matching
+        q_clean = re.sub(r"\s+", " ", q_lower).strip()
+        q_norm = q_clean.rstrip("?.!,;:")
+
         # 1. Identity queries — answer with locked response
         for pattern in _IDENTITY_PATTERNS:
-            if re.search(pattern, q_lower):
+            if re.search(pattern, q_clean):
                 return True, IDENTITY_RESPONSE, "identity"
 
         # 2. Character manipulation / model-probing — lock response
         for pattern in _CHARACTER_LOCK_PATTERNS:
-            if re.search(pattern, q_lower):
+            if re.search(pattern, q_clean):
                 return True, CHARACTER_LOCK_RESPONSE, "character_lock"
 
         # 3. Hard blocklist — out of scope
         for pattern in _BLOCKLIST_PATTERNS:
-            if re.search(pattern, q_lower):
+            if re.search(pattern, q_clean):
                 return True, OUT_OF_SCOPE_RESPONSE, "blocklist"
 
         # 4. Fast in-scope keyword pass
-        if any(kw in q_lower for kw in _IN_SCOPE_KEYWORDS):
+        if any(kw in q_clean or kw in q_norm for kw in _IN_SCOPE_KEYWORDS):
             return False, None, "in_scope"
 
         # 5. Default — treat as out of scope if no keywords matched
         # (very short / ambiguous queries land here)
-        if len(q.split()) < 3:
+        if len(q_clean.split()) < 3:
             # Very short queries — pass through, let the LLM handle vagueness
             return False, None, "short_query"
 
