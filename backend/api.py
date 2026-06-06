@@ -84,6 +84,10 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 if tts_router is not None:
     app.include_router(tts_router)
 
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(cleanup_stale_sessions_periodically())
+
 # ── Load index and query engine once at startup ──────────────────────────────
 print("Loading RAG indexes and query engines ...")
 
@@ -131,17 +135,47 @@ class SessionState:
             "weak_subject": {"value": "None detected", "confidence": "medium"}
         }
         self.recommendations = []
+        self.last_accessed = time.time()
 
 sessions = {}
 
 def get_or_create_session(session_id: str) -> SessionState:
     if not session_id:
         session_id = "default"
-    if session_id not in sessions:
-        sessions[session_id] = SessionState(session_id)
-        # Initial recommendations
-        sessions[session_id].recommendations = generate_recommendations("general")
-    return sessions[session_id]
+    
+    session = sessions.get(session_id)
+    if session is None:
+        # Enforce LRU cache limit of 1000 sessions
+        if len(sessions) >= 1000:
+            # Find and evict the oldest session that is not "default"
+            non_default = [(sid, s.last_accessed) for sid, s in sessions.items() if sid != "default"]
+            if non_default:
+                oldest_sid = min(non_default, key=lambda x: x[1])[0]
+                sessions.pop(oldest_sid, None)
+                logger.info(f"Evicted LRU session: {oldest_sid}")
+        
+        session = SessionState(session_id)
+        session.recommendations = generate_recommendations("general")
+        sessions[session_id] = session
+    
+    session.last_accessed = time.time()
+    return session
+
+async def cleanup_stale_sessions_periodically():
+    """Background task to remove sessions inactive for more than 2 hours."""
+    while True:
+        await asyncio.sleep(1800)  # Check every 30 minutes
+        try:
+            now = time.time()
+            stale_keys = [
+                sid for sid, s in sessions.items()
+                if sid != "default" and now - s.last_accessed > 7200
+            ]
+            for sid in stale_keys:
+                sessions.pop(sid, None)
+                logger.info(f"Cleaned up stale session: {sid}")
+        except Exception as e:
+            logger.error(f"Error in session cleanup task: {e}")
 
 # ── Recommendations Generator ────────────────────────────────────────────────
 def generate_recommendations(topic: str) -> list[dict]:
