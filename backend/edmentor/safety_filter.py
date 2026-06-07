@@ -1,6 +1,8 @@
 import re
 
-def edumentor_filter(text: str, max_words: int = 250) -> str:
+MAX_WORDS = 75  # not 250 — voice contract is 75 words
+
+def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     """
     Cleans response text for natural voice synthesis:
     - Strips markdown formatting (headers, lists, bold).
