@@ -74,45 +74,11 @@ async def rag_retrieve_and_respond(query: str, llm_model=None, tokenizer=None, k
     if not valid_retrieved:
         return "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
 
-    # Build context string from retrieved mentor answers (top-2 is enough)
-    context = "\n---\n".join(valid_retrieved[:2])
-
-    # Wrap in Edmentor system prompt
-    prompt = f"""You are Edmentor — a senior engineering mentor. A student asked:
-"{query}"
-
-Here are relevant mentor insights on this topic:
-{context}
-
-Respond as Edmentor. Speak naturally, no markdown, 60-160 words. Be direct."""
-
-    # Generate response
-    if llm_model is not None and tokenizer is not None:
-        # Local model mode (USE_LOCAL_MODEL=True)
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        def local_generate():
-            inputs = tokenizer(prompt, return_tensors="pt").to(device)
-            with torch.no_grad():
-                output = llm_model.generate(
-                    **inputs,
-                    max_new_tokens=200,
-                    temperature=0.7,
-                    do_sample=True
-                )
-            gen_ids = output[0][inputs["input_ids"].shape[1]:]
-            return tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
-
-        response = await loop.run_in_executor(None, local_generate)
-        return response
+    # Extract the mentor response from the highest rank document directly
+    top_doc = valid_retrieved[0]
+    if "Mentor:" in top_doc:
+        response = top_doc.split("Mentor:", 1)[1].strip()
     else:
-        # Interim Mode: use Groq API to generate response
-        # Import groq client singleton
-        from edmentor.groq_client import llm as groq_llm
-        
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
-        response = await groq_llm.chat(messages)
-        return response
+        response = top_doc.strip()
+
+    return response
