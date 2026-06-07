@@ -50,7 +50,7 @@ def strip_markdown(text: str) -> str:
     return text.strip()
 
 
-def enforce_voice_limit(text: str, max_words: int = 80) -> str:
+def enforce_voice_limit(text: str, max_words: int = 75) -> str:
     """
     Hard post-processing word-limit enforcement for voice output.
 
@@ -61,7 +61,7 @@ def enforce_voice_limit(text: str, max_words: int = 80) -> str:
 
     Args:
         text:       The raw LLM response string.
-        max_words:  Maximum word count. Default 80 (~22 seconds of speech).
+        max_words:  Maximum word count. Default 75 (~22 seconds of speech).
 
     Returns:
         Clean, sentence-terminated string within the word limit.
