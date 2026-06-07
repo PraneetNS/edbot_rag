@@ -53,24 +53,26 @@ async def test_pipeline(groq_key: str = None):
         snippet = c.replace("\n", " ")[:150]
         print(f"   ({idx}) {snippet}...")
 
-    # 4. Build Messages
-    history = edmentor_memory.get_last_turns("test_session", n=2)
-    messages = build_messages(history=history, chunks=chunks, question=question)
-
-    # 5. Call LLM
-    print("4. Calling LLM (Groq)...")
-    raw_response = await edmentor_llm.chat(messages)
+    # 4. Extract Mentor response from top chunk directly (no Groq LLM)
+    print("4. Extracting response from RAG chunks directly...")
+    if chunks:
+        top_chunk = chunks[0]
+        if "Mentor:" in top_chunk:
+            raw_response = top_chunk.split("Mentor:", 1)[1].strip()
+        else:
+            raw_response = top_chunk.strip()
+    else:
+        raw_response = "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
     print(f"Raw Response: {raw_response}")
 
-    # 6. Voice limit enforcement
-    final_response = enforce_voice_limit(raw_response, max_words=80)
+    # 5. Voice limit enforcement
+    final_response = enforce_voice_limit(raw_response, max_words=75)
     word_count = len(final_response.split())
-    print(f"\n5. Final Enforced Response (under 80 words):")
+    print(f"\n5. Final Enforced Response (under 75 words):")
     print("-" * 50)
     print(final_response)
     print("-" * 50)
     print(f"Word count: {word_count}")
-    print(f"Groq Available: {edmentor_llm.groq.is_available}")
 
 if __name__ == "__main__":
     key = sys.argv[1] if len(sys.argv) > 1 else None

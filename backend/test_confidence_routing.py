@@ -54,74 +54,55 @@ class TestEdmentorRoutingPipeline(unittest.IsolatedAsyncioTestCase):
 
     def test_safety_filter_sentence_boundary_truncation(self):
         print("\n--- Testing Safety Filter Sentence Boundary Truncation ---")
-        # Construct a response with exactly 260 words, split across 3 sentences.
-        # Sentence 1: 100 words. Sentence 2: 120 words (Total = 220 words). Sentence 3: 40 words (Total = 260 words).
-        # It should cut exactly after Sentence 2 (at 220 words) since Sentence 3 would exceed 250 words.
-        s1 = " ".join(["word"] * 100) + "."
-        s2 = " ".join(["cool"] * 120) + "."
-        s3 = " ".join(["last"] * 40) + "."
+        # Construct a response with exactly 80 words, split across 3 sentences.
+        # Sentence 1: 30 words. Sentence 2: 35 words (Total = 65 words). Sentence 3: 15 words (Total = 80 words).
+        # It should cut exactly after Sentence 2 (at 65 words) since Sentence 3 would exceed 75 words.
+        s1 = " ".join(["word"] * 30) + "."
+        s2 = " ".join(["cool"] * 35) + "."
+        s3 = " ".join(["last"] * 15) + "."
         
         full_text = f"{s1} {s2} {s3}"
-        self.assertEqual(len(full_text.split()), 260)
+        self.assertEqual(len(full_text.split()), 80)
         
         trimmed = edumentor_filter(full_text)
         trimmed_words = trimmed.split()
         
-        print(f"Original word count: 260")
+        print(f"Original word count: 80")
         print(f"Trimmed word count: {len(trimmed_words)}")
         print(f"Trimmed text ends with: '{' '.join(trimmed_words[-5:])}'")
         
-        # Trimmed word count should be 220
-        self.assertEqual(len(trimmed_words), 220)
+        # Trimmed word count should be 65
+        self.assertEqual(len(trimmed_words), 65)
         self.assertTrue(trimmed.endswith("cool."))
         self.assertNotIn("last", trimmed)
 
-    @patch('edmentor.groq_client.llm.chat')
-    async def test_groq_interim_mode_direct(self, mock_chat):
-        print("\n--- Testing Groq Interim Mode (Direct Response) ---")
-        # Force USE_LOCAL_MODEL = False
-        with patch('edmentor.confidence_router.USE_LOCAL_MODEL', False):
-            # Mock Groq to return a valid mentoring response
-            mock_chat.return_value = "Keep practicing recursion first before moving to dynamic programming."
-            
-            response, routing_mode = await generate_response_with_routing("explain dynamic programming", self.session_id)
-            print(f"Response: '{response}'")
-            print(f"Routing Mode: '{routing_mode}'")
-            
-            self.assertEqual(response, "Keep practicing recursion first before moving to dynamic programming.")
-            self.assertEqual(routing_mode, "groq_interim_direct")
-            mock_chat.assert_called_once()
+    async def test_first_turn_greeting(self):
+        print("\n--- Testing First Turn Greeting Behavior ---")
+        for q in ["hello", "hi", "hey", "Sup?", "dsa"]:
+            response, routing_mode = await generate_response_with_routing(q, self.session_id)
+            print(f"Query: '{q}' -> Response: '{response}' | Mode: '{routing_mode}'")
+            self.assertEqual(routing_mode, "first_turn_greeting")
+            self.assertIn("Tell me what you are working on", response)
 
-    @patch('edmentor.groq_client.llm.chat')
     @patch('edmentor.rag_engine.get_chroma_resources')
-    async def test_groq_interim_mode_fallback(self, mock_get_chroma, mock_chat):
-        print("\n--- Testing Groq Interim Mode (RAG Fallback on Error) ---")
-        
-        # Mock ChromaDB response with n_results=3
+    async def test_rag_direct_response(self, mock_get_chroma):
+        print("\n--- Testing Direct RAG Retrieval Response ---")
+        # Mock ChromaDB query return value
         mock_col = MagicMock()
         mock_col.query.return_value = {
-            "documents": [["Start with recursion.", "Practice trees."]],
-            "distances": [[0.3, 0.4]]
+            "documents": [["Student: explain recursion\nMentor: Start with a base case, then write the recursive call."]],
+            "distances": [[0.1]]
         }
         mock_embedder = MagicMock()
         mock_embedder.encode.return_value = [0.1] * 384
         mock_get_chroma.return_value = (mock_col, mock_embedder)
-        
-        # Force USE_LOCAL_MODEL = False
-        with patch('edmentor.confidence_router.USE_LOCAL_MODEL', False):
-            # 1. Mock Groq to return empty (simulating failure)
-            mock_chat.return_value = ""
-            
-            # Second call to mock_chat will generate RAG wrapped response
-            # Since rag_retrieve_and_respond will call groq_llm.chat to generate response from wrapped prompt
-            mock_chat.side_effect = ["", "Here are insights: Start with recursion. Practice trees."]
-            
-            response, routing_mode = await generate_response_with_routing("explain dynamic programming", self.session_id)
-            print(f"Response: '{response}'")
-            print(f"Routing Mode: '{routing_mode}'")
-            
-            self.assertEqual(routing_mode, "groq_interim_rag_fallback")
-            self.assertIn("Start with recursion", response)
+
+        response, routing_mode = await generate_response_with_routing("explain recursion", self.session_id)
+        print(f"Response: '{response}'")
+        print(f"Routing Mode: '{routing_mode}'")
+
+        self.assertEqual(routing_mode, "rag_direct")
+        self.assertEqual(response, "Start with a base case, then write the recursive call.")
 
 if __name__ == "__main__":
     unittest.main()
