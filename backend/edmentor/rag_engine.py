@@ -69,12 +69,13 @@ async def rag_retrieve_and_respond(query: str, llm_model=None, tokenizer=None, k
     retrieved = results["documents"][0]  # list of k answers
     distances = results["distances"][0]
 
-    # If best match is too distant, use generic fallback (cosine distance threshold of 0.6)
-    if distances[0] > 0.6:
+    # Only keep retrieved chunks that clear the cosine distance threshold of 0.15 (0.85 similarity)
+    valid_retrieved = [doc for doc, dist in zip(retrieved, distances) if dist <= 0.15]
+    if not valid_retrieved:
         return "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
 
     # Build context string from retrieved mentor answers (top-2 is enough)
-    context = "\n---\n".join(retrieved[:2])
+    context = "\n---\n".join(valid_retrieved[:2])
 
     # Wrap in Edmentor system prompt
     prompt = f"""You are Edmentor — a senior engineering mentor. A student asked:
