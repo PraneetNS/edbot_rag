@@ -760,7 +760,7 @@ async def edmentor_query(req: EdmentorRequest):
     is_blocked, guard_response, reason = edmentor_guard.check(q)
     if is_blocked:
         if reason in ("identity", "character_lock"):
-            final_response = edumentor_filter(guard_response, max_words=80)
+            final_response = edumentor_filter(guard_response, max_words=75)
         else:
             final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
             
@@ -788,8 +788,8 @@ async def edmentor_query(req: EdmentorRequest):
     # 3. LLM generation with confidence routing (local vs interim Groq)
     response_raw, routing_mode = await generate_response_with_routing(q, req.session_id)
 
-    # 4. Safety filter & 80-word sentence boundary truncation for voice response
-    final_response = edumentor_filter(response_raw, max_words=80)
+    # 4. Safety filter & 75-word sentence boundary truncation for voice response
+    final_response = edumentor_filter(response_raw, max_words=75)
 
     # Save turn to memory
     edmentor_memory.save_turn(req.session_id, q, final_response)
@@ -832,7 +832,7 @@ async def edmentor_query_stream(req: EdmentorRequest):
     is_blocked, guard_response, reason = edmentor_guard.check(q)
     if is_blocked:
         if reason in ("identity", "character_lock"):
-            final_response = edumentor_filter(guard_response, max_words=80)
+            final_response = edumentor_filter(guard_response, max_words=75)
         else:
             final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
             
@@ -846,9 +846,9 @@ async def edmentor_query_stream(req: EdmentorRequest):
             yield final_response
         return StreamingResponse(_intent_reject(), media_type="text/event-stream")
 
-    # 2. Generate response with confidence routing (enforce 80-word voice limit)
+    # 2. Generate response with confidence routing (enforce 75-word voice limit)
     response_raw, routing_mode = await generate_response_with_routing(q, req.session_id)
-    final_response = edumentor_filter(response_raw, max_words=80)
+    final_response = edumentor_filter(response_raw, max_words=75)
 
     # Save to memory
     edmentor_memory.save_turn(req.session_id, q, final_response)
