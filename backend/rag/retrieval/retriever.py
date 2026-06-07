@@ -340,7 +340,11 @@ def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int 
     except Exception as e:
         logger.warning(f"Reranking failed, using raw retrieval: {e}")
 
-    return [nws.node.text for nws in nodes[:top_k]]
+    # Tighten similarity threshold to 0.85
+    # nws.score represents cosine similarity. If it is less than 0.85, we filter it out.
+    valid_nodes = [nws for nws in nodes if nws.score is not None and nws.score >= 0.85]
+
+    return [nws.node.text for nws in valid_nodes[:top_k]]
 
 
 def get_edumentor_query_engine_5k(index: VectorStoreIndex):
