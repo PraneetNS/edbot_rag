@@ -12,8 +12,7 @@ if str(EDMENTOR_DIR) not in sys.path:
 
 logger = logging.getLogger(__name__)
 
-# Single environment flag to control routing mode
-USE_LOCAL_MODEL = os.getenv("USE_LOCAL_MODEL", "False").lower() in ("true", "1", "yes")
+USE_LOCAL_MODEL = False  # Temporarily disabled per user request
 LOCAL_MODEL_PATH = os.getenv("LOCAL_MODEL_PATH", "")
 
 # Singletons for local model
@@ -67,7 +66,20 @@ async def llm_generate_with_confidence(query: str, model, tokenizer):
     """
     Step 4 — Generates response using local model and computes average token probability.
     """
-    EDUMENTOR_SYSTEM = """You are Edmentor — a senior engineering mentor and career guide built exclusively for 2nd, 3rd, and 4th year engineering students.
+    EDUMENTOR_SYSTEM = """━━━ FIRST TURN BEHAVIOR ━━━
+
+When a student opens with a greeting, a single word, or nothing specific —
+do not ask them a generic question.
+Say exactly this, in your own voice, naturally:
+
+"Hey. Tell me what you are working on or stuck on right now.
+DSA, placements, resume, internships, projects — whatever it is, let's get into it."
+
+That is it. Short. Direct. No "how can I assist you today."
+No "what engineering challenge are you facing."
+You are a mentor, not a helpdesk.
+
+You are Edmentor — a senior engineering mentor and career guide built exclusively for 2nd, 3rd, and 4th year engineering students.
 
 IDENTITY
 Your name is Edmentor. That is the only name you have. You are not an AI assistant, not a language model, not Claude, not GPT, not any named system. You are Edmentor. If a student asks what you are, who made you, or what model powers you, you say only: I am Edmentor, your engineering mentor. Nothing more.
@@ -139,61 +151,23 @@ Students speak to you through a voice interface. Their input may be transcribed 
 async def generate_response_with_routing(query: str, session_id: str = "default") -> tuple[str, str]:
     """
     Routes query to appropriate generation model:
-    - In Local Model Mode (USE_LOCAL_MODEL=True):
-        Runs model.generate and computes token probabilities.
-        Falls back to RAG if confidence is below 0.40.
-    - In Interim Mode (USE_LOCAL_MODEL=False):
-        Runs Groq directly. Falls back to RAG ONLY if Groq returns empty or errors.
-        
-    Returns:
-        tuple (response_text, routing_mode_str)
+    - Bypasses Groq API entirely.
+    - If it's a greeting, returns the first turn greeting behavior response.
+    - Otherwise, routes directly to RAG retrieval and parses mentor answer.
     """
     from edmentor.rag_engine import rag_retrieve_and_respond
 
-    # Mode 1: Local Model with Logprob Confidence Routing
-    if USE_LOCAL_MODEL:
-        model, tokenizer = get_local_model()
-        if model is not None and tokenizer is not None:
-            logger.info("Routing query to local model...")
-            response, confidence = await llm_generate_with_confidence(query, model, tokenizer)
-            logger.info(f"Local generation finished. Confidence: {confidence:.2f}")
-            
-            if confidence < 0.40:
-                logger.info(f"Low confidence ({confidence:.2f}), triggering RAG fallback.")
-                response = await rag_retrieve_and_respond(query, model, tokenizer)
-                return response, "local_model_rag_fallback"
-            else:
-                return response, "local_model_direct"
-        else:
-            logger.warning("Local model enabled but failed to load. Falling back to Groq interim mode.")
-            # Fall through to Groq interim routing if local model fail
-            
-    # Mode 2: Groq Interim Mode (USE_LOCAL_MODEL=False or local model failed to load)
-    from edmentor.groq_client import llm as groq_llm
-    from edmentor.prompt import build_messages
-    from edmentor.memory import memory as edmentor_memory
+    # 1. First-turn greeting check
+    q_clean = query.strip().lower().rstrip("?.!")
+    greetings = {"hello", "hi", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening", "yo", "sup", "heyy", "heyyy"}
     
-    logger.info("Routing query to Groq in interim mode...")
-    
-    # Construct history messages
-    history = edmentor_memory.get_last_turns(session_id, n=2)
-    # RAG context is empty here as we are doing LLM-primary directly
-    messages = build_messages(history=history, chunks=[], question=query)
-    
-    groq_failed = False
-    response = ""
-    try:
-        response = await groq_llm.chat(messages)
-    except Exception as e:
-        logger.error(f"Groq API call threw error in interim mode: {e}")
-        groq_failed = True
-        
-    # Check if empty, error, or returned default canned error response
-    canned_error = "I am having a connection issue right now"
-    if not response or response.strip() == "" or canned_error in response or groq_failed:
-        logger.info("Groq returned empty or error response. Triggering RAG fallback in interim mode.")
-        # Trigger RAG fallback (llm_model=None, tokenizer=None runs RAG with Groq wrapping)
-        response = await rag_retrieve_and_respond(query, None, None)
-        return response, "groq_interim_rag_fallback"
-        
-    return response, "groq_interim_direct"
+    if not q_clean or q_clean in greetings or len(q_clean.split()) == 1:
+        greeting_response = (
+            "Hey. Tell me what you are working on or stuck on right now. "
+            "DSA, placements, resume, internships, projects — whatever it is, let's get into it."
+        )
+        return greeting_response, "first_turn_greeting"
+
+    # 2. Retrieve from RAG directly and return the mentor text
+    response = await rag_retrieve_and_respond(query, None, None)
+    return response, "rag_direct"
