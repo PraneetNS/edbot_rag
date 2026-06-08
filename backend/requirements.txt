@@ -14,5 +14,4 @@ llama-index-embeddings-huggingface
 llama-index-llms-ollama
 llama-index-postprocessor-flag-embedding-reranker
 # Edmentor additions
-groq
 python-dotenv
