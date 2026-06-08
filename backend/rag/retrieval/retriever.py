@@ -61,8 +61,14 @@ class PriorityTopicPostprocessor(BaseNodePostprocessor):
     def _postprocess_nodes(
         self, nodes: List[NodeWithScore], query_bundle: Optional[QueryBundle] = None
     ) -> List[NodeWithScore]:
-        if not query_bundle:
+        if not nodes:
             return nodes
+
+        # Extract all raw scores to calculate min/max
+        scores = [nws.score if nws.score is not None else 0.0 for nws in nodes]
+        min_score = min(scores)
+        max_score = max(scores)
+        denom = max_score - min_score
 
         priority_weights = {
             "dsa": 1.5,
@@ -77,7 +83,13 @@ class PriorityTopicPostprocessor(BaseNodePostprocessor):
         boosted_nodes = []
         for nws in nodes:
             node = nws.node
-            score = nws.score or 0.0
+            raw_score = nws.score if nws.score is not None else 0.0
+            
+            # Normalize to 0-1
+            if denom == 0:
+                normalized = 1.0
+            else:
+                normalized = (raw_score - min_score) / (denom + 1e-8)
             
             topic = str(node.metadata.get("topic", "")).lower()
             text = node.text.lower()
@@ -93,7 +105,8 @@ class PriorityTopicPostprocessor(BaseNodePostprocessor):
                 if kw in text:
                     boost = max(boost, weight * 0.9)  # Lower weight for text body match
             
-            nws.score = score * boost
+            # Apply topic boost multiplier on the normalized score
+            nws.score = normalized * boost
             boosted_nodes.append(nws)
             
         # Re-sort descending based on updated boosted score
@@ -340,9 +353,8 @@ def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int 
     except Exception as e:
         logger.warning(f"Reranking failed, using raw retrieval: {e}")
 
-    # Tighten similarity threshold to 0.85
-    # nws.score represents cosine similarity. If it is less than 0.85, we filter it out.
-    valid_nodes = [nws for nws in nodes if nws.score is not None and nws.score >= 0.85]
+    # Filter out chunks that do not meet the 0.40 threshold on normalized/boosted score
+    valid_nodes = [nws for nws in nodes if nws.score is not None and nws.score >= 0.40]
 
     return [nws.node.text for nws in valid_nodes[:top_k]]
 
