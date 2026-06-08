@@ -15,12 +15,25 @@ except ImportError:
 
 import re
 
+ON_DOMAIN_KEYWORDS = [
+    "array", "linked list", "tree", "graph", "recursion", "pointer", "stack", "queue", 
+    "heap", "hash", "sort", "search", "dp", "dynamic programming", "placement", 
+    "internship", "resume", "project", "leetcode", "interview", "backlog", "cgpa", 
+    "semester", "college", "offer", "career", "algorithm", "complexity", "os", 
+    "dbms", "cn", "networking", "oops", "java", "python", "c plus plus", 
+    "system design", "bit manipulation", "string", "binary", "matrix"
+]
+
 def is_off_domain(query: str) -> bool:
     """
     Evaluates if the query is outside Edmentor's mentoring domain.
     Returns True if off-domain (blocked), False if on-domain.
     """
     query_lower = query.lower().strip()
+    
+    # First, check the on-domain keywords
+    if any(keyword in query_lower for keyword in ON_DOMAIN_KEYWORDS):
+        return False
     
     # Check explicit blocklist patterns (which might otherwise bypass DomainGuard because of helper keywords like 'how')
     safety_blocklist = [
