@@ -31,8 +31,12 @@ print(f"Initializing persistent ChromaDB client at: {CHROMA_PATH}")
 client = chromadb.PersistentClient(path=str(CHROMA_PATH))
 
 # Create or clear collection
-print("Creating collection 'edumentor_mentor' with cosine distance...")
-collection = client.get_or_create_collection(
+print("Clearing and creating collection 'edumentor_mentor' with cosine distance...")
+try:
+    client.delete_collection("edumentor_mentor")
+except Exception:
+    pass
+collection = client.create_collection(
     name="edumentor_mentor",
     metadata={"hnsw:space": "cosine"}
 )
