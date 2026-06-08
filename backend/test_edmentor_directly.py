@@ -10,20 +10,12 @@ if str(BACKEND_DIR) not in sys.path:
 # Ensure offline modes for libraries
 os.environ["HF_HUB_OFFLINE"] = "1"
 
-async def test_pipeline(groq_key: str = None):
-    if groq_key:
-        os.environ["GROQ_API_KEY"] = groq_key
-        # Force re-read of env in client
-        import edmentor.groq_client
-        edmentor.groq_client.GROQ_API_KEY = groq_key
-        edmentor.groq_client.llm.groq._init_client()
-
+async def test_pipeline():
     from edmentor.topic_classifier import EdmentorTopicClassifier
     from rag.retrieval.retriever import retrieve_chunks_for_edmentor
     from edmentor.guard import guard as edmentor_guard
     from edmentor.memory import memory as edmentor_memory
     from edmentor.prompt import build_messages
-    from edmentor.groq_client import llm as edmentor_llm
     from edmentor.voice_limit import enforce_voice_limit
 
     classifier = EdmentorTopicClassifier()
@@ -53,7 +45,7 @@ async def test_pipeline(groq_key: str = None):
         snippet = c.replace("\n", " ")[:150]
         print(f"   ({idx}) {snippet}...")
 
-    # 4. Extract Mentor response from top chunk directly (no Groq LLM)
+    # 4. Extract Mentor response from top chunk directly (no local LLM generation)
     print("4. Extracting response from RAG chunks directly...")
     if chunks:
         top_chunk = chunks[0]
@@ -75,5 +67,4 @@ async def test_pipeline(groq_key: str = None):
     print(f"Word count: {word_count}")
 
 if __name__ == "__main__":
-    key = sys.argv[1] if len(sys.argv) > 1 else None
-    asyncio.run(test_pipeline(key))
+    asyncio.run(test_pipeline())

@@ -29,7 +29,7 @@ except ImportError as e:
 
 # Import modular components
 from edmentor.intent_router import is_off_domain
-from edmentor.confidence_router import get_local_model, llm_generate_with_confidence, generate_response_with_routing, USE_LOCAL_MODEL
+from edmentor.confidence_router import generate_response_with_routing
 from edmentor.rag_engine import rag_retrieve_and_respond
 from edmentor.safety_filter import edumentor_filter
 
@@ -103,7 +103,7 @@ async def full_pipeline(audio_array: np.ndarray) -> np.ndarray:
         response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
         print(f"Intent check: OFF-DOMAIN. Response: {response}")
     else:
-        # 3. LLM with confidence-based routing (local vs interim Groq)
+        # 3. LLM with routing (local Qwen vs direct RAG fallback)
         # Encapsulated in the confidence_router
         response, routing_mode = await generate_response_with_routing(query)
         print(f"LLM routing mode: {routing_mode}")

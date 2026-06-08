@@ -16,7 +16,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 # Import components
 from edmentor.intent_router import is_off_domain
 from edmentor.safety_filter import edumentor_filter
-from edmentor.confidence_router import generate_response_with_routing, USE_LOCAL_MODEL
+from edmentor.confidence_router import generate_response_with_routing
 from edmentor.rag_engine import rag_retrieve_and_respond
 
 class TestEdmentorRoutingPipeline(unittest.IsolatedAsyncioTestCase):

@@ -738,12 +738,12 @@ async function checkHealth() {
   try {
     const res  = await fetch(`${API_BASE}/edmentor/health`);
     const data = await res.json();
-    if (data.ready && data.groq_available) {
+    if (data.ready && data.qwen_available) {
       statusDot.className   = 'status-dot online';
-      statusLabel.textContent = 'Groq Online';
-    } else if (data.ready && data.ollama_available) {
+      statusLabel.textContent = 'Qwen Local';
+    } else if (data.ready) {
       statusDot.className   = 'status-dot fallback';
-      statusLabel.textContent = 'Ollama Fallback';
+      statusLabel.textContent = 'RAG Local';
     } else {
       statusDot.className   = 'status-dot';
       statusLabel.textContent = 'Offline';
@@ -865,6 +865,87 @@ function hideTyping() {
   if (el) el.remove();
 }
 
+let audioQueue = [];
+let isPlayingAudio = false;
+let currentPlayingAudio = null;
+
+function queueAudio(base64Wav) {
+  if (isMuted) return;
+  try {
+    const binaryString = atob(base64Wav);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    audioQueue.push(url);
+    if (!isPlayingAudio) {
+      playNextAudio();
+    }
+  } catch (err) {
+    console.error('Error in queueAudio:', err);
+  }
+}
+
+function playNextAudio() {
+  if (audioQueue.length === 0) {
+    isPlayingAudio = false;
+    waveform.classList.remove('active');
+    document.querySelectorAll('.btn-play.playing').forEach(b => b.classList.remove('playing'));
+    return;
+  }
+  
+  if (window.speechSynthesis && window.speechSynthesis.speaking) {
+    window.speechSynthesis.cancel();
+  }
+  
+  isPlayingAudio = true;
+  waveform.classList.add('active');
+  const url = audioQueue.shift();
+  
+  const audio = new Audio(url);
+  currentPlayingAudio = audio;
+  
+  // Highlight the current bot play button
+  const playBtns = document.querySelectorAll('.btn-play');
+  const lastPlayBtn = playBtns[playBtns.length - 1];
+  if (lastPlayBtn) {
+    lastPlayBtn.classList.add('playing');
+  }
+  
+  audio.onended = () => {
+    URL.revokeObjectURL(url);
+    currentPlayingAudio = null;
+    playNextAudio();
+  };
+  
+  audio.onerror = () => {
+    URL.revokeObjectURL(url);
+    currentPlayingAudio = null;
+    playNextAudio();
+  };
+  
+  audio.play().catch(err => {
+    console.error('Audio play error:', err);
+    URL.revokeObjectURL(url);
+    currentPlayingAudio = null;
+    playNextAudio();
+  });
+}
+
+function stopPlayingAudio() {
+  if (currentPlayingAudio) {
+    currentPlayingAudio.pause();
+    currentPlayingAudio = null;
+  }
+  audioQueue = [];
+  isPlayingAudio = false;
+  waveform.classList.remove('active');
+  document.querySelectorAll('.btn-play.playing').forEach(b => b.classList.remove('playing'));
+}
+
 // ── Send message ──────────────────────────────────────────────────────────
 async function sendMessage() {
   const q = textInput.value.trim();
@@ -892,62 +973,69 @@ async function sendMessage() {
   showTyping();
 
   try {
-    const res = await fetch(`${API_BASE}/edmentor/query/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q, session_id: sessionId }),
-    });
-
-    hideTyping();
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Cancel any ongoing speaking / queue
+    stopSpeaking();
 
     // Create bot bubble for streaming
     const botPlaceholder = { role: 'bot', text: '', time: timeStr, topic: '', duration: '' };
     const botRow = appendBubble(botPlaceholder);
     const bubbleEl = botRow.querySelector('.bubble');
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    hideTyping();
+
+    // Connect to single unified GET-based SSE stream
+    const streamUrl = `${API_BASE}/edmentor/query/stream?question=${encodeURIComponent(q)}&session_id=${sessionId}`;
+    const eventSource = new EventSource(streamUrl);
     let fullText = '';
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const token = decoder.decode(value, { stream: true });
-      fullText += token;
-      bubbleEl.textContent = fullText;
+    eventSource.addEventListener('text', (e) => {
+      // Append new sentence directly (grows sentence by sentence)
+      bubbleEl.innerText += e.data + " ";
+      fullText += e.data + " ";
       scrollBottom();
-    }
+    });
 
-    // Fetch topic + duration from a non-streaming call (reuse /edmentor/query won't work after
-    // streaming already got the answer — we'll parse it from a health check)
-    // Instead, we update with a separate metadata request if needed.
-    // For now, derive topic from the classifier response embedded in health.
-    const duration = estimateDuration(fullText);
+    eventSource.addEventListener('audio', (e) => {
+      // Queue audio for sequential gapless playback
+      queueAudio(e.data);
+    });
 
-    // Update history entry
-    const botMsg = { role: 'bot', text: fullText, time: timeStr, topic: '', duration };
-    chatHistory.push(botMsg);
-    _saveHistory();
+    eventSource.addEventListener('done', (e) => {
+      eventSource.close();
+      finalizeStream();
+    });
 
-    // Update the meta row
-    const metaEl = botRow.querySelector('.msg-meta');
-    if (metaEl) {
-      metaEl.innerHTML = `
-        ${timeStr}
-        <span class="duration-badge">${duration}</span>
-        <button class="btn-play" title="Play response">▶</button>
-      `;
-      metaEl.querySelector('.btn-play').addEventListener('click', () =>
-        speakText(fullText, metaEl.querySelector('.btn-play'))
-      );
-    }
+    eventSource.addEventListener('error', (e) => {
+      console.error('SSE Stream error:', e);
+      eventSource.close();
+      finalizeStream();
+    });
 
-    // Auto-speak if not muted
-    if (!isMuted && fullText) {
-      const playBtn = botRow.querySelector('.btn-play');
-      speakText(fullText, playBtn);
+    function finalizeStream() {
+      isSending = false;
+      sendBtn.disabled = textInput.value.trim().length === 0;
+      textInput.focus();
+
+      const duration = estimateDuration(fullText);
+
+      // Update history entry
+      const botMsg = { role: 'bot', text: fullText.trim(), time: timeStr, topic: '', duration };
+      chatHistory.push(botMsg);
+      _saveHistory();
+
+      // Update the meta row
+      const metaEl = botRow.querySelector('.msg-meta');
+      if (metaEl) {
+        metaEl.innerHTML = `
+          ${timeStr}
+          <span class="duration-badge">${duration}</span>
+          <button class="btn-play" title="Play response">▶</button>
+        `;
+        metaEl.querySelector('.btn-play').addEventListener('click', () =>
+          speakText(fullText.trim(), metaEl.querySelector('.btn-play'))
+        );
+      }
+      scrollBottom();
     }
 
   } catch (err) {
@@ -963,7 +1051,6 @@ async function sendMessage() {
     chatHistory.push(errMsg);
     _saveHistory();
     appendBubble(errMsg);
-  } finally {
     isSending = false;
     sendBtn.disabled = textInput.value.trim().length === 0;
     textInput.focus();
@@ -983,9 +1070,7 @@ async function speakText(text, btn) {
   if (isMuted) return;
 
   // Stop any current speech
-  if (window.speechSynthesis && window.speechSynthesis.speaking) {
-    window.speechSynthesis.cancel();
-  }
+  stopSpeaking();
 
   // Mark button as playing
   document.querySelectorAll('.btn-play.playing').forEach(b => b.classList.remove('playing'));
@@ -1006,20 +1091,27 @@ async function speakText(text, btn) {
         const blob = await res.blob();
         const url  = URL.createObjectURL(blob);
         const audio = new Audio(url);
+        currentPlayingAudio = audio;
+        isPlayingAudio = true;
+        
         audio.onended = () => {
           waveform.classList.remove('active');
           if (btn) btn.classList.remove('playing');
           URL.revokeObjectURL(url);
+          currentPlayingAudio = null;
+          isPlayingAudio = false;
         };
         audio.onerror = () => {
           waveform.classList.remove('active');
           if (btn) btn.classList.remove('playing');
+          URL.revokeObjectURL(url);
+          currentPlayingAudio = null;
+          isPlayingAudio = false;
           _browserTTS(text, btn);
         };
         audio.play();
         return;
       }
-      // {"tts_unavailable": true} — fall through to browser TTS
     }
   } catch { /* fall through */ }
 
@@ -1063,8 +1155,7 @@ function _browserTTS(text, btn) {
 
 function stopSpeaking() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
-  waveform.classList.remove('active');
-  document.querySelectorAll('.btn-play.playing').forEach(b => b.classList.remove('playing'));
+  stopPlayingAudio();
 }
 
 // ── Mute toggle ───────────────────────────────────────────────────────────

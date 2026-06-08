@@ -17,8 +17,11 @@ def test_endpoint(url, payload=None, method="POST"):
         print(f"Status: {r.status_code}")
         try:
             print(json.dumps(r.json(), indent=2))
-        except:
-            print(r.text[:200])
+        except Exception:
+            try:
+                print(r.text[:200])
+            except UnicodeEncodeError:
+                print(r.content[:200])
         return r
     except Exception as e:
         print(f"Error: {e}")
