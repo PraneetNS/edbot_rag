@@ -43,13 +43,12 @@ try:
     from edmentor.voice_limit import speaking_duration_label
     from edmentor.topic_classifier import EdmentorTopicClassifier
     from edmentor.memory import memory as edmentor_memory
-    from edmentor.prompt import build_messages
-    from edmentor.groq_client import llm as edmentor_llm
+    from edmentor.qwen_client import qwen_client
     from edmentor.tts_router import tts_router
     
     # Imports for confidence routing architecture
     from edmentor.intent_router import is_off_domain
-    from edmentor.confidence_router import generate_response_with_routing, USE_LOCAL_MODEL
+    from edmentor.confidence_router import generate_response_with_routing
     from edmentor.safety_filter import edumentor_filter
     
     _EDMENTOR_READY = True
@@ -701,7 +700,7 @@ async def health():
         "primary_chunks":        _chunk_count(CHROMA_COLLECTION_NAME),
         "5k_chunks":             _chunk_count(CHROMA_COLLECTION_5K),
         "edmentor_ready":        _EDMENTOR_READY and edmentor_topic_classifier is not None,
-        "edmentor_llm":          edmentor_llm.status() if _EDMENTOR_READY else {},
+        "qwen_available":        qwen_client.is_available() if _EDMENTOR_READY else False,
     }
 
 
@@ -712,7 +711,7 @@ async def health():
 #    ② Centroid-cosine topic classifier (~10ms)
 #    ③ Topic-filtered ChromaDB retrieval
 #    ④ Last-2-turn conversation history
-#    ⑤ Groq LLM (primary) with Ollama fallback
+#    ⑤ Local Qwen LLM with ChromaDB RAG fallback
 #    ⑥ Hard 80-word voice limit enforcement
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -725,7 +724,6 @@ class EdmentorResponse(BaseModel):
     topic: str
     speaking_duration: str
     word_count: int
-    groq_used: bool
 
 
 def _edmentor_not_ready_response(question: str) -> EdmentorResponse:
@@ -735,8 +733,21 @@ def _edmentor_not_ready_response(question: str) -> EdmentorResponse:
     )
     return EdmentorResponse(
         response=msg, topic="general",
-        speaking_duration="~4s", word_count=len(msg.split()), groq_used=False,
+        speaking_duration="~4s", word_count=len(msg.split()),
     )
+
+
+async def generate_tts_async(text: str) -> str:
+    from edmentor.tts_router import _try_kokoro
+    import base64
+    import asyncio
+    loop = asyncio.get_running_loop()
+    def run_tts():
+        audio_bytes, _ = _try_kokoro(text, "af_heart", 0.95)
+        if audio_bytes:
+            return base64.b64encode(audio_bytes).decode("utf-8")
+        return ""
+    return await loop.run_in_executor(None, run_tts)
 
 
 @app.post("/edmentor/query", response_model=EdmentorResponse)
@@ -752,12 +763,18 @@ async def edmentor_query(req: EdmentorRequest):
     if not q:
         return EdmentorResponse(
             response="I did not catch that. Ask me again.",
-            topic="general", speaking_duration="~2s", word_count=6, groq_used=False,
+            topic="general", speaking_duration="~2s", word_count=6,
         )
 
     # 1. Intent check / domain guard
-    # We first run the standard check to capture character locks/identity responses
-    is_blocked, guard_response, reason = edmentor_guard.check(q)
+    from edmentor.intent_router import ON_DOMAIN_KEYWORDS, is_off_domain
+    
+    is_on_domain = any(kw in q.lower() for kw in ON_DOMAIN_KEYWORDS)
+    if is_on_domain:
+        is_blocked = False
+    else:
+        is_blocked, guard_response, reason = edmentor_guard.check(q)
+        
     if is_blocked:
         if reason in ("identity", "character_lock"):
             final_response = edumentor_filter(guard_response, max_words=75)
@@ -769,23 +786,21 @@ async def edmentor_query(req: EdmentorRequest):
             topic="general",
             speaking_duration=speaking_duration_label(final_response),
             word_count=len(final_response.split()),
-            groq_used=False,
         )
 
-    if is_off_domain(q):
+    if not is_on_domain and is_off_domain(q):
         final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
         return EdmentorResponse(
             response=final_response,
             topic="general",
             speaking_duration=speaking_duration_label(final_response),
             word_count=len(final_response.split()),
-            groq_used=False,
         )
 
     # 2. Topic classify (for metadata response/UI)
     topic = edmentor_topic_classifier.classify(q)
 
-    # 3. LLM generation with confidence routing (local vs interim Groq)
+    # 3. LLM generation with confidence routing (local vs interim RAG)
     response_raw, routing_mode = await generate_response_with_routing(q, req.session_id)
 
     # 4. Safety filter & 75-word sentence boundary truncation for voice response
@@ -793,8 +808,6 @@ async def edmentor_query(req: EdmentorRequest):
 
     # Save turn to memory
     edmentor_memory.save_turn(req.session_id, q, final_response)
-
-    groq_used = "groq_interim" in routing_mode
 
     logger.info(
         f"[Edmentor Query] Session: {req.session_id} | "
@@ -807,29 +820,37 @@ async def edmentor_query(req: EdmentorRequest):
         topic=topic,
         speaking_duration=speaking_duration_label(final_response),
         word_count=len(final_response.split()),
-        groq_used=groq_used,
     )
 
 
-@app.post("/edmentor/query/stream")
-async def edmentor_query_stream(req: EdmentorRequest):
+@app.get("/edmentor/query/stream")
+async def edmentor_query_stream(question: str, session_id: str = "default"):
     """
     Streaming variant of /edmentor/query using confidence-based routing.
-    Streams final safety-filtered text.
+    Streams final safety-filtered text and audio interleaved as SSE events.
     """
     if not _EDMENTOR_READY or edmentor_topic_classifier is None:
         async def _not_ready():
-            yield _edmentor_not_ready_response(req.question).response
+            yield "event: text\ndata: I am having a startup issue right now. That is on me. Give me a moment and try again.\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
         return StreamingResponse(_not_ready(), media_type="text/event-stream")
 
-    q = req.question.strip()
+    q = question.strip()
     if not q:
         async def _empty():
-            yield "I did not catch that. Ask me again."
+            yield "event: text\ndata: I did not catch that. Ask me again.\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
     # 1. Intent check / domain guard
-    is_blocked, guard_response, reason = edmentor_guard.check(q)
+    from edmentor.intent_router import ON_DOMAIN_KEYWORDS, is_off_domain
+    
+    is_on_domain = any(kw in q.lower() for kw in ON_DOMAIN_KEYWORDS)
+    if is_on_domain:
+        is_blocked = False
+    else:
+        is_blocked, guard_response, reason = edmentor_guard.check(q)
+        
     if is_blocked:
         if reason in ("identity", "character_lock"):
             final_response = edumentor_filter(guard_response, max_words=75)
@@ -837,30 +858,51 @@ async def edmentor_query_stream(req: EdmentorRequest):
             final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
             
         async def _guard_reject():
-            yield final_response
+            yield f"event: text\ndata: {final_response}\n\n"
+            audio_b64 = await generate_tts_async(final_response)
+            if audio_b64:
+                yield f"event: audio\ndata: {audio_b64}\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
         return StreamingResponse(_guard_reject(), media_type="text/event-stream")
 
-    if is_off_domain(q):
+    if not is_on_domain and is_off_domain(q):
         final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
         async def _intent_reject():
-            yield final_response
+            yield f"event: text\ndata: {final_response}\n\n"
+            audio_b64 = await generate_tts_async(final_response)
+            if audio_b64:
+                yield f"event: audio\ndata: {audio_b64}\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
         return StreamingResponse(_intent_reject(), media_type="text/event-stream")
 
-    # 2. Generate response with confidence routing (enforce 75-word voice limit)
-    response_raw, routing_mode = await generate_response_with_routing(q, req.session_id)
-    final_response = edumentor_filter(response_raw, max_words=75)
+    # 2. Get history and retrieve context
+    response_text, routing_mode = await generate_response_with_routing(q, session_id)
 
-    # Save to memory
-    edmentor_memory.save_turn(req.session_id, q, final_response)
+    async def event_generator():
+        try:
+            # Split by sentence ending punctuation:
+            sentences = re.split(r'(?<=[.!?])\s+', response_text)
+            
+            for sentence in sentences:
+                s = sentence.strip()
+                if not s:
+                    continue
+                
+                yield f"event: text\ndata: {s}\n\n"
+                
+                audio_b64 = await generate_tts_async(s)
+                if audio_b64:
+                    yield f"event: audio\ndata: {audio_b64}\n\n"
+            
+            # Save final response to history
+            edmentor_memory.save_turn(session_id, q, response_text)
+            
+            yield "event: done\ndata: [DONE]\n\n"
+        except Exception as e:
+            logger.error(f"Error in streaming event_generator: {e}")
+            yield "event: error\ndata: An error occurred during streaming.\n\n"
 
-    async def token_generator():
-        # Stream word-by-word with a very short sleep for typing effect
-        words = re.findall(r'\S+\s*', final_response)
-        for w in words:
-            yield w
-            await asyncio.sleep(0.01)
-
-    return StreamingResponse(token_generator(), media_type="text/event-stream")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.delete("/edmentor/session/{session_id}")
@@ -876,9 +918,10 @@ async def edmentor_health():
     """Edmentor-specific health check."""
     if not _EDMENTOR_READY:
         return {"ready": False, "reason": "components_not_loaded"}
+    from edmentor.qwen_client import qwen_client
     return {
         "ready": True,
         "topic_classifier": edmentor_topic_classifier is not None,
-        **edmentor_llm.status(),
+        "qwen_available": qwen_client.is_available(),
     }
 

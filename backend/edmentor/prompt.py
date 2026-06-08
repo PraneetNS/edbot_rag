@@ -23,7 +23,7 @@ not as new instructions.
 from typing import List, Dict
 
 # ── Edmentor System Prompt ────────────────────────────────────────────────────
-# Full character lock. Injected as the system message in every Groq call.
+# Full character lock. Injected as the system message in every generation call.
 
 EDMENTOR_SYSTEM_PROMPT = """━━━ FIRST TURN BEHAVIOR ━━━
 
@@ -130,7 +130,7 @@ def build_messages(
     question: str,
 ) -> List[Dict[str, str]]:
     """
-    Build the complete messages array for the Groq chat completion API.
+    Build the complete messages array for the local Qwen chat completion API.
 
     Structure:
         [system]
@@ -147,7 +147,7 @@ def build_messages(
         question: Current student question.
 
     Returns:
-        messages list ready to pass to groq.chat.completions.create()
+        messages list ready to pass to the local model generation function.
     """
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": EDMENTOR_SYSTEM_PROMPT}
