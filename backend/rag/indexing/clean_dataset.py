@@ -51,6 +51,7 @@ with open(INPUT_PATH, "r", encoding="utf-8") as infile:
         clean_docs.append({
             "question": user_q,
             "answer": asst_a,
+            "source": d.get("source", "Edumentor Dataset"),
             # Combined for embedding — question gives semantic context
             "text": f"Student: {user_q}\nMentor: {asst_a}"
         })
