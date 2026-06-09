@@ -16,19 +16,27 @@ _collection = None
 _embedder = None
 
 QUERY_EXPANSIONS = {
-    'arrays': 'arrays data structure practice problems two pointer sliding window',
-    'placement': 'placement preparation interview coding resume 60 days plan',
+    'arrays': 'arrays data structure practice problems two pointer sliding window progression array next step',
+    'placement': 'placement preparation interview coding resume 60 days plan timeline prep roadmap',
     'recursion': 'recursion base case stack call explanation beginner',
     'resume': 'resume projects skills engineering student format',
     'backlog': 'backlog placement eligibility impact career',
     'dp': 'dynamic programming memoization tabulation practice',
     'linked list': 'linked list operations reversal cycle detection',
     'trees': 'binary tree traversal bst problems',
+    # Explicit time-based placement prep
+    '60 days': 'placement preparation 60 days plan timeline prep roadmap study schedule',
+    '30 days': 'placement preparation 30 days plan timeline prep roadmap study schedule',
+    'placement prep': 'placement preparation roadmap timeline prep plan schedule',
+    # Explicit DSA progression
+    'do next': 'dsa progression data structures arrays learning path next topic',
+    'next step': 'dsa progression data structures arrays learning path next topic',
+    'what next': 'dsa progression data structures arrays learning path next topic',
 }
 
 def expand_query(query: str) -> str:
-    # Check if query has under 8 words
-    if len(query.split()) < 8:
+    # Check if query has under 15 words
+    if len(query.split()) < 15:
         q_lower = query.lower()
         for keyword, expansion in QUERY_EXPANSIONS.items():
             if keyword in q_lower:
@@ -55,7 +63,7 @@ async def retrieve_chunks(query: str, k: int = 3) -> list[str]:
     """
     Retrieves top-k chunk texts (mentor answers) from ChromaDB collection.
     Applies query expansion first.
-    Filters out chunks with similarity below 0.40 (cosine distance > 0.60).
+    Filters out chunks with similarity below 0.15 (cosine distance > 0.85).
     """
     try:
         collection, embedder = get_chroma_resources()
@@ -79,9 +87,11 @@ async def retrieve_chunks(query: str, k: int = 3) -> list[str]:
         q_embedding = list(embedding)
 
     # Retrieve top-k (overfetch a bit so we can filter by threshold)
+    # Filter only for Edumentor Dataset source
     results = collection.query(
         query_embeddings=[q_embedding],
         n_results=k * 2,
+        where={"source": "Edumentor Dataset"},
         include=["documents", "metadatas", "distances"]
     )
 
@@ -91,8 +101,8 @@ async def retrieve_chunks(query: str, k: int = 3) -> list[str]:
     retrieved = results["documents"][0]
     distances = results["distances"][0]
 
-    # Filter by similarity threshold 0.40 (dist <= 0.60)
-    valid_chunks = [doc for doc, dist in zip(retrieved, distances) if dist <= 0.60]
+    # Filter by similarity threshold 0.15 (dist <= 0.85)
+    valid_chunks = [doc for doc, dist in zip(retrieved, distances) if dist <= 0.85]
     return valid_chunks[:k]
 
 def build_qwen_prompt(chunks: list[str], query: str) -> str:
@@ -109,6 +119,21 @@ def build_qwen_prompt(chunks: list[str], query: str) -> str:
         f"Mentor Response:"
     )
 
+def is_ambiguous_or_context_free(query: str) -> bool:
+    """Check if query is genuinely ambiguous, one-word, or context-free."""
+    q_clean = query.strip().lower().rstrip("?.!")
+    words = q_clean.split()
+    if len(words) <= 1:
+        return True
+    
+    # If 2 words, check if it contains any on-domain keyword
+    from edmentor.intent_router import ON_DOMAIN_KEYWORDS
+    if len(words) == 2:
+        if not any(kw in q_clean for kw in ON_DOMAIN_KEYWORDS):
+            return True
+            
+    return False
+
 async def rag_retrieve_and_respond(query: str, llm_model=None, tokenizer=None, k: int = 3) -> str:
     """
     RAG retrieval and response generation.
@@ -119,13 +144,33 @@ async def rag_retrieve_and_respond(query: str, llm_model=None, tokenizer=None, k
     # Check if Qwen is available
     from edmentor.qwen_client import qwen_client
     if qwen_client.is_available():
-        prompt = build_qwen_prompt(chunks, query)
-        response_raw = await qwen_client.generate(prompt)
+        if not chunks:
+            # Fallback path when RAG fails to find relevant chunks but LLM is available
+            if is_ambiguous_or_context_free(query):
+                return "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
+                
+            system_prompt = "You are Edmentor, a senior engineering mentor."
+            prompt = (
+                "Answer the student's question using your own knowledge as a senior engineering mentor. "
+                "Do not use markdown, bullet points, or list formatting. Keep the response natural, spoken, and under 75 words.\n\n"
+                f"Student Question: {query}"
+            )
+            response_raw = await qwen_client.generate(prompt, system_prompt=system_prompt)
+        else:
+            prompt = build_qwen_prompt(chunks, query)
+            response_raw = await qwen_client.generate(prompt)
         return edumentor_filter(response_raw, max_words=75)
 
-    # Fallback to direct top chunk answer
+    # Fallback to direct top chunk answer when Qwen is offline
     if not chunks:
-        return "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
+        if is_ambiguous_or_context_free(query):
+            return "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
+            
+        offline_fallback = (
+            "I am EduMentor. I currently do not have enough verified context in my knowledge base to answer this question. "
+            "However, as a senior mentor, I suggest looking into official documentation and academic roadmaps to guide your research."
+        )
+        return edumentor_filter(offline_fallback, max_words=75)
 
     top_chunk = chunks[0]
     
