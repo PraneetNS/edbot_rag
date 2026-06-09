@@ -12,11 +12,33 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     if not text:
         return ""
 
-    # Strip any leftover markdown (finetuning contamination may bleed through)
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    text = re.sub(r'#{1,3}\s', '', text)
-    text = re.sub(r'^\s*[-*]\s', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*\d+\.\s', '', text, flags=re.MULTILINE)
+    # Remove fenced code blocks entirely
+    text = re.sub(r"```[\s\S]*?```", "", text)
+
+    # Remove inline code
+    text = re.sub(r"`[^`]+`", lambda m: m.group(0).strip("`"), text)
+    text = text.replace("`", "")
+
+    # Remove bold/italic markers
+    text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{1,3}(.*?)_{1,3}", r"\1", text)
+    text = text.replace("*", "").replace("_", "")
+
+    # Remove ATX headers
+    text = re.sub(r"^\s*#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = text.replace("#", "")
+
+    # Convert numbered lists to natural flow
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+
+    # Remove dash/asterisk bullet points
+    text = re.sub(r"^\s*[-*•]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n\s*[-*•]\s+", " ", text)
+
+    # Remove parenthetical meta-tags or reference source lines
+    text = re.sub(r"\*\(.*?\)\*", "", text)
+    text = re.sub(r"\(Source:.*?\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[Source:.*?\]", "", text, flags=re.IGNORECASE)
     
     # Remove AI filler phrases
     fillers = [
