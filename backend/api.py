@@ -476,7 +476,7 @@ async def query_endpoint(req: QueryRequest):
     if query_engine is not None:
         try:
             response_obj = query_engine.query(req.question)
-            response_text = str(response_obj)
+            response_text = edumentor_filter(str(response_obj))
             
             # Simple retrieval confidence calculation
             confidence = 1.0
@@ -549,7 +549,7 @@ async def query_stream_endpoint(req: QueryRequest):
     if query_engine is not None:
         try:
             response_obj = query_engine.query(req.question)
-            response_text = str(response_obj)
+            response_text = edumentor_filter(str(response_obj))
         except Exception as e:
             logger.error(f"Error querying RAG engine for stream: {e}")
             
@@ -617,7 +617,7 @@ async def query_5k_endpoint(req: QueryRequest):
 
     try:
         response_obj  = query_engine_5k.query(req.question)
-        response_text = str(response_obj)
+        response_text = edumentor_filter(str(response_obj))
         source_nodes  = getattr(response_obj, "source_nodes", [])
         scores = [n.score for n in source_nodes if n.score is not None]
         confidence = min(1.0, max(0.1, sum(scores) / len(scores) / 10.0)) if scores else 1.0
