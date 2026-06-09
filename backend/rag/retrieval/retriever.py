@@ -157,19 +157,39 @@ class FallbackEduMentorQueryEngine:
         for pp in self.postprocessors:
             nodes = pp.postprocess_nodes(nodes, QueryBundle(query_str))
 
+        from edmentor.safety_filter import edumentor_filter
+
+        # Try to call local LLM if it's active
+        if check_ollama_active():
+            import requests
+            payload = {
+                "model": OLLAMA_MODEL,
+                "prompt": f"Answer the student's question using your own knowledge as a senior engineering mentor. Do not use markdown, bullet points, or list formatting. Keep the response natural, spoken, and under 75 words.\n\nStudent Question: {query_str}",
+                "system": "You are Edmentor, a senior engineering mentor. You answer student questions in plain natural spoken sentences only. Never use markdown, bold, lists, or formatting.",
+                "stream": False,
+                "options": {
+                    "temperature": 0.3
+                }
+            }
+            try:
+                r = requests.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=10)
+                if r.status_code == 200:
+                    response_text = r.json().get("response", "").strip()
+                    cleaned_response = edumentor_filter(response_text)
+                    return QueryResponse(cleaned_response, nodes)
+            except Exception as e:
+                logger.error(f"Error calling LLM in fallback query engine: {e}")
+
         if not nodes:
             fallback_text = (
-                "Hello! I am EduMentor.\n\n"
-                "I currently do not have enough verified context in my knowledge base to answer this question. "
+                "I am EduMentor. I currently do not have enough verified context in my knowledge base to answer this question. "
                 "However, as a senior mentor, I suggest looking into official documentation and academic roadmaps "
-                "to guide your research!"
+                "to guide your research."
             )
-            return QueryResponse(fallback_text, [])
+            return QueryResponse(edumentor_filter(fallback_text), [])
 
         top_nws = nodes[0]
         text = top_nws.node.text
-        topic = top_nws.node.metadata.get("topic", "General")
-        source = top_nws.node.metadata.get("source", "Unknown")
 
         # Parse out pure Mentor Explanation from formatted document
         explanation = text
@@ -178,17 +198,9 @@ class FallbackEduMentorQueryEngine:
             if len(parts) > 1:
                 explanation = parts[1].split("Topic:")[0].strip()
 
-        fallback_text = (
-            f"*(EduMentor - Offline Fallback Mode)*\n\n"
-            f"### Senior Mentor Explanation:\n"
-            f"{explanation}\n\n"
-            f"### Actionable Mentoring Steps:\n"
-            f"1. Focus your study on **{topic}** from verified references (Source: {source}).\n"
-            f"2. Apply these concepts directly in hands-on programming projects.\n"
-            f"3. Make mistakes early, debug extensively, and analyze worst-case time complexities.\n\n"
-            f"*(Retrieved from verified engineering knowledge base)*"
-        )
-        return QueryResponse(fallback_text, nodes)
+        # Clean the explanation through the safety filter to remove all formatting and templates
+        clean_explanation = edumentor_filter(explanation)
+        return QueryResponse(clean_explanation, nodes)
 
 # --- 4. Loading Index & Retrieving Engine ---
 def load_rag_index() -> VectorStoreIndex:
@@ -221,7 +233,17 @@ def get_edumentor_query_engine(index: VectorStoreIndex):
     Leverages SentenceTransformerRerank and PriorityTopicPostprocessor.
     Automatically handles offline fallback.
     """
-    retriever = index.as_retriever(similarity_top_k=SIMILARITY_TOP_K)
+    from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
+    filters = MetadataFilters(
+        filters=[
+            MetadataFilter(
+                key="source",
+                value="Edumentor Dataset",
+                operator=FilterOperator.EQ,
+            )
+        ]
+    )
+    retriever = index.as_retriever(similarity_top_k=SIMILARITY_TOP_K, filters=filters)
     
     reranker = get_cached_reranker(RERANK_TOP_N)
     priority_pp = PriorityTopicPostprocessor()
@@ -277,7 +299,7 @@ def load_rag_index_5k() -> VectorStoreIndex:
 def get_edmentor_retriever(topic: str = "General", top_k: int = 3):
     """
     Returns a retriever for the edumentor_5k collection with optional
-    ChromaDB topic metadata pre-filter.
+    ChromaDB topic metadata pre-filter and source tag filter.
 
     When topic != 'General', only chunks tagged with that topic are
     searched — DSA queries only retrieve DSA chunks, etc.
@@ -304,26 +326,28 @@ def get_edmentor_retriever(topic: str = "General", top_k: int = 3):
         embed_model=embed_model,
     )
 
-    # Apply topic metadata filter when not General
+    filters_list = [
+        MetadataFilter(
+            key="source",
+            value="Edumentor Dataset",
+            operator=FilterOperator.EQ,
+        )
+    ]
     if topic and topic.lower() != "general":
-        filters = MetadataFilters(
-            filters=[
-                MetadataFilter(
-                    key="topic",
-                    value=topic,
-                    operator=FilterOperator.EQ,
-                )
-            ]
+        filters_list.append(
+            MetadataFilter(
+                key="topic",
+                value=topic,
+                operator=FilterOperator.EQ,
+            )
         )
-        retriever = index.as_retriever(
-            similarity_top_k=top_k,
-            filters=filters,
-        )
-        logger.info(f"EdmentorRetriever: topic filter='{topic}', top_k={top_k}")
-    else:
-        retriever = index.as_retriever(similarity_top_k=top_k)
-        logger.info(f"EdmentorRetriever: no topic filter (General), top_k={top_k}")
-
+    
+    filters = MetadataFilters(filters=filters_list)
+    retriever = index.as_retriever(
+        similarity_top_k=top_k,
+        filters=filters,
+    )
+    logger.info(f"EdmentorRetriever: topic filter='{topic}', source filter='Edumentor Dataset', top_k={top_k}")
     return retriever
 
 
@@ -353,8 +377,8 @@ def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int 
     except Exception as e:
         logger.warning(f"Reranking failed, using raw retrieval: {e}")
 
-    # Filter out chunks that do not meet the 0.40 threshold on normalized/boosted score
-    valid_nodes = [nws for nws in nodes if nws.score is not None and nws.score >= 0.40]
+    # Filter out chunks that do not meet the 0.15 threshold on normalized/boosted score (was 0.40)
+    valid_nodes = [nws for nws in nodes if nws.score is not None and nws.score >= 0.15]
 
     return [nws.node.text for nws in valid_nodes[:top_k]]
 
@@ -365,7 +389,17 @@ def get_edumentor_query_engine_5k(index: VectorStoreIndex):
     Identical pipeline to the main engine (reranker + priority postprocessor),
     but backed by the deduplicated synthetic 5k dataset.
     """
-    retriever    = index.as_retriever(similarity_top_k=SIMILARITY_TOP_K)
+    from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
+    filters = MetadataFilters(
+        filters=[
+            MetadataFilter(
+                key="source",
+                value="Edumentor Dataset",
+                operator=FilterOperator.EQ,
+            )
+        ]
+    )
+    retriever    = index.as_retriever(similarity_top_k=SIMILARITY_TOP_K, filters=filters)
     reranker     = get_cached_reranker(RERANK_TOP_N)
     priority_pp  = PriorityTopicPostprocessor()
 
