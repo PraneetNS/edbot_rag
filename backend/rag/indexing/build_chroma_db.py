@@ -52,7 +52,7 @@ for i in range(0, len(docs), BATCH):
     collection.add(
         documents=[d["answer"] for d in batch],  # Store only the mentor's answer for retrieval
         embeddings=embeddings,
-        metadatas=[{"question": d["question"]} for d in batch],
+        metadatas=[{"question": d["question"], "source": d.get("source", "Edumentor Dataset")} for d in batch],
         ids=[str(uuid.uuid4()) for _ in batch]
     )
     if i % 1000 == 0 or (i + BATCH) >= len(docs):
