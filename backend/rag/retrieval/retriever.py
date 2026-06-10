@@ -298,26 +298,13 @@ def load_rag_index_5k() -> VectorStoreIndex:
 
 def get_edmentor_retriever(topic: str = "General", top_k: int = 3):
     """
-    Returns a retriever for the edumentor_5k collection with optional
-    ChromaDB topic metadata pre-filter and source tag filter.
-
-    When topic != 'General', only chunks tagged with that topic are
-    searched — DSA queries only retrieve DSA chunks, etc.
-    When topic == 'General', no filter is applied (broad retrieval).
-
-    Args:
-        topic:  Topic label from EdmentorTopicClassifier.classify().
-                Must match the 'topic' metadata field in ChromaDB.
-        top_k:  Number of chunks to retrieve before reranking.
-
-    Returns:
-        A LlamaIndex retriever with optional ChromaDB where filter.
+    Returns a retriever for the edumentor_knowledge collection.
     """
     from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
 
     chroma_manager = ChromaManager(
         persist_dir=CHROMA_PERSIST_DIR,
-        collection_name=CHROMA_COLLECTION_5K,
+        collection_name=CHROMA_COLLECTION_NAME, # Main collection
     )
     vector_store = chroma_manager.get_vector_store()
     embed_model  = get_cached_embed_model()
@@ -333,52 +320,30 @@ def get_edmentor_retriever(topic: str = "General", top_k: int = 3):
             operator=FilterOperator.EQ,
         )
     ]
-    if topic and topic.lower() != "general":
-        filters_list.append(
-            MetadataFilter(
-                key="topic",
-                value=topic,
-                operator=FilterOperator.EQ,
-            )
-        )
     
     filters = MetadataFilters(filters=filters_list)
     retriever = index.as_retriever(
         similarity_top_k=top_k,
         filters=filters,
     )
-    logger.info(f"EdmentorRetriever: topic filter='{topic}', source filter='Edumentor Dataset', top_k={top_k}")
+    logger.info(f"EdmentorRetriever: source filter='Edumentor Dataset', top_k={top_k}")
     return retriever
 
 
 def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int = 3) -> List[str]:
     """
-    Convenience function: retrieve top-k chunk texts for a query + topic.
-    Applies reranking and priority boost. Returns plain text list for prompt injection.
-
-    Args:
-        query:  The student's question.
-        topic:  Classified topic for metadata pre-filter.
-        top_k:  Number of final chunks to return.
-
-    Returns:
-        List of chunk text strings (already in Student:/Mentor: format).
+    Retrieves top-k chunk texts for a query + topic.
+    Applies the exact 0.45 similarity threshold (dist <= 0.55).
     """
-    retriever = get_edmentor_retriever(topic=topic, top_k=top_k * 2)  # over-fetch then rerank
+    retriever = get_edmentor_retriever(topic=topic, top_k=top_k)
     nodes = retriever.retrieve(query)
 
-    # Apply reranker
-    try:
-        reranker = get_cached_reranker(top_k)
-        priority_pp = PriorityTopicPostprocessor()
-        from llama_index.core import QueryBundle
-        nodes = reranker.postprocess_nodes(nodes, QueryBundle(query))
-        nodes = priority_pp.postprocess_nodes(nodes, QueryBundle(query))
-    except Exception as e:
-        logger.warning(f"Reranking failed, using raw retrieval: {e}")
-
-    # Filter out chunks that do not meet the 0.15 threshold on normalized/boosted score (was 0.40)
-    valid_nodes = [nws for nws in nodes if nws.score is not None and nws.score >= 0.15]
+    valid_nodes = []
+    for nws in nodes:
+        dist = nws.score if nws.score is not None else 1.0
+        similarity = 1.0 - dist
+        if similarity >= 0.45:
+            valid_nodes.append(nws)
 
     return [nws.node.text for nws in valid_nodes[:top_k]]
 
