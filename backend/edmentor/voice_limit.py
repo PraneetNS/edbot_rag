@@ -50,55 +50,14 @@ def strip_markdown(text: str) -> str:
     return text.strip()
 
 
-def enforce_voice_limit(text: str, max_words: int = 75) -> str:
+def enforce_voice_limit(text: str, max_words: int = 60) -> str:
     """
     Hard post-processing word-limit enforcement for voice output.
-
-    1. Strip markdown (bullets, headers, bold markers).
-    2. If response is within limit — return as-is.
-    3. If over limit — cut at the last sentence boundary within max_words.
-       Ensures the response ends on a complete sentence, not mid-thought.
-
-    Args:
-        text:       The raw LLM response string.
-        max_words:  Maximum word count. Default 75 (~22 seconds of speech).
-
-    Returns:
-        Clean, sentence-terminated string within the word limit.
+    Routes to safety_filter's edumentor_filter to maintain consistent cleaning.
     """
-    # Step 1: Clean markdown
-    text = strip_markdown(text)
+    from edmentor.safety_filter import edumentor_filter
+    return edumentor_filter(text, max_words=max_words)
 
-    # Step 2: Normalise whitespace
-    text = " ".join(text.split())
-
-    if not text:
-        return "I did not catch that. Could you ask me again?"
-
-    # Step 3: Count words
-    words = text.split()
-    if len(words) <= max_words:
-        # Ensure it ends with punctuation
-        if text[-1] not in ".?!":
-            text += "."
-        return text
-
-    # Step 4: Truncate to max_words
-    truncated = " ".join(words[:max_words])
-
-    # Step 5: Find the last natural sentence boundary within the truncation
-    last_boundary = max(
-        truncated.rfind("."),
-        truncated.rfind("?"),
-        truncated.rfind("!"),
-    )
-
-    # Only use boundary if it's past the halfway point (avoids super-short cuts)
-    if last_boundary > len(truncated) // 2:
-        return truncated[: last_boundary + 1].strip()
-
-    # Fallback: return truncated words with a period appended
-    return truncated.rstrip(",;:") + "."
 
 
 def word_count(text: str) -> int:
