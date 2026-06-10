@@ -1,6 +1,6 @@
 import re
 
-MAX_WORDS = 75  # not 250 — voice contract is 75 words
+MAX_WORDS = 60  # voice contract is 60 words / 80 tokens
 
 def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     """
@@ -11,6 +11,16 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     """
     if not text:
         return ""
+
+    # Strip any line starting with * or containing ###
+    lines = text.split("\n")
+    cleaned_lines = []
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line.startswith("*") or "###" in stripped_line:
+            continue
+        cleaned_lines.append(line)
+    text = "\n".join(cleaned_lines)
 
     # Remove fenced code blocks entirely
     text = re.sub(r"```[\s\S]*?```", "", text)
