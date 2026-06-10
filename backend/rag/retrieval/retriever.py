@@ -227,54 +227,95 @@ def check_ollama_active() -> bool:
     except Exception:
         return False
 
-def get_edumentor_query_engine(index: VectorStoreIndex):
+class EduMentorRAGQueryEngine:
     """
-    Returns the custom EduMentor Query Engine.
-    Leverages SentenceTransformerRerank and PriorityTopicPostprocessor.
-    Automatically handles offline fallback.
+    Unified query engine for EduMentor that executes exact 0.45 threshold filtering,
+    prompt synthesis, and LLM generation.
     """
-    from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
-    filters = MetadataFilters(
-        filters=[
-            MetadataFilter(
-                key="source",
-                value="Edumentor Dataset",
-                operator=FilterOperator.EQ,
+    def __init__(self, index: VectorStoreIndex, is_5k: bool = False):
+        self.index = index
+        self.is_5k = is_5k
+        
+    def query(self, query_str: str) -> QueryResponse:
+        from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
+        filters = MetadataFilters(
+            filters=[
+                MetadataFilter(
+                    key="source",
+                    value="Edumentor Dataset",
+                    operator=FilterOperator.EQ,
+                )
+            ]
+        )
+        # Fetch similarity_top_k = 3
+        retriever = self.index.as_retriever(similarity_top_k=3, filters=filters)
+        nodes = retriever.retrieve(query_str)
+        
+        # Filter by threshold 0.45 (1.0 - dist >= 0.45)
+        valid_nodes = []
+        for nws in nodes:
+            dist = nws.score if nws.score is not None else 1.0
+            similarity = 1.0 - dist
+            if similarity >= 0.45:
+                nws.score = similarity # normalize score to similarity
+                valid_nodes.append(nws)
+                
+        # Build prompt exactly as instructed
+        if valid_nodes:
+            chunk_texts = [f"{nws.node.text}" for nws in valid_nodes[:2]]
+            knowledge_str = "\n".join(chunk_texts)
+            prompt = (
+                "You are EduMentor, a direct senior engineer mentoring an Indian "
+                "engineering student. Speak casually, 2-3 sentences max, no markdown.\n\n"
+                "Relevant knowledge:\n"
+                f"{knowledge_str}\n\n"
+                f"Student asks: {query_str}\n\n"
+                "Answer by synthesising the knowledge above into a natural spoken reply. "
+                "Do NOT copy the knowledge verbatim. Do NOT use bullet points or lists."
             )
-        ]
-    )
-    retriever = index.as_retriever(similarity_top_k=SIMILARITY_TOP_K, filters=filters)
-    
-    reranker = get_cached_reranker(RERANK_TOP_N)
-    priority_pp = PriorityTopicPostprocessor()
-    
-    if check_ollama_active():
-        logger.info("Local Ollama service detected. Activating full Mistral LLM Query Engine...")
-        llm = Ollama(
-            model=OLLAMA_MODEL,
-            base_url=OLLAMA_BASE_URL,
-            request_timeout=120.0
-        )
+        else:
+            prompt = (
+                "You are EduMentor, a direct senior engineer mentoring an Indian "
+                "engineering student. Speak casually, 2-3 sentences max, no markdown.\n\n"
+                f"Student asks: {query_str}\n\n"
+                "Answer from your general knowledge as a mentor. Stay on-domain "
+                "(DSA, placements, internships, resume, career, projects). "
+                "If completely off-domain, say: \"That's outside what I focus on. "
+                "Ask me about DSA, placements, or your career instead.\""
+            )
+            
+        response_text = ""
+        if check_ollama_active():
+            import requests
+            payload = {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3
+                }
+            }
+            try:
+                r = requests.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=60)
+                if r.status_code == 200:
+                    response_text = r.json().get("response", "").strip()
+            except Exception as e:
+                logger.error(f"Error calling Ollama: {e}")
+                
+        if not response_text:
+            response_text = (
+                "I am EduMentor. My LLM brain is currently offline. "
+                "Double check that Ollama is running on your system so I can synthesize a reply."
+            )
+            
+        from edmentor.safety_filter import edumentor_filter
+        response_text = edumentor_filter(response_text)
         
-        response_synthesizer = get_response_synthesizer(
-            response_mode="compact",
-            text_qa_template=QA_PROMPT_TEMPLATE,
-            llm=llm
-        )
-        
-        query_engine = RetrieverQueryEngine(
-            retriever=retriever,
-            node_postprocessors=[reranker, priority_pp],
-            response_synthesizer=response_synthesizer
-        )
-        return query_engine
-    else:
-        logger.info("Ollama service not running. Initializing Fallback EduMentor Query Engine...")
-        return FallbackEduMentorQueryEngine(
-            retriever=retriever,
-            postprocessors=[reranker, priority_pp]
-        )
+        return QueryResponse(response_text, valid_nodes)
 
+def get_edumentor_query_engine(index: VectorStoreIndex):
+    """Returns the custom EduMentor Query Engine."""
+    return EduMentorRAGQueryEngine(index, is_5k=False)
 
 # ── 5k Dataset Variants ──────────────────────────────────────────────────────
 
@@ -349,45 +390,6 @@ def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int 
 
 
 def get_edumentor_query_engine_5k(index: VectorStoreIndex):
-    """
-    Returns a query engine targeting the 'edumentor_5k' collection.
-    Identical pipeline to the main engine (reranker + priority postprocessor),
-    but backed by the deduplicated synthetic 5k dataset.
-    """
-    from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
-    filters = MetadataFilters(
-        filters=[
-            MetadataFilter(
-                key="source",
-                value="Edumentor Dataset",
-                operator=FilterOperator.EQ,
-            )
-        ]
-    )
-    retriever    = index.as_retriever(similarity_top_k=SIMILARITY_TOP_K, filters=filters)
-    reranker     = get_cached_reranker(RERANK_TOP_N)
-    priority_pp  = PriorityTopicPostprocessor()
+    """Returns a query engine targeting the 'edumentor_5k' collection."""
+    return EduMentorRAGQueryEngine(index, is_5k=True)
 
-    if check_ollama_active():
-        logger.info("[5k] Ollama detected — activating Mistral LLM query engine.")
-        llm = Ollama(
-            model=OLLAMA_MODEL,
-            base_url=OLLAMA_BASE_URL,
-            request_timeout=120.0,
-        )
-        response_synthesizer = get_response_synthesizer(
-            response_mode="compact",
-            text_qa_template=QA_PROMPT_TEMPLATE,
-            llm=llm,
-        )
-        return RetrieverQueryEngine(
-            retriever=retriever,
-            node_postprocessors=[reranker, priority_pp],
-            response_synthesizer=response_synthesizer,
-        )
-    else:
-        logger.info("[5k] Ollama offline — using Fallback EduMentor Query Engine.")
-        return FallbackEduMentorQueryEngine(
-            retriever=retriever,
-            postprocessors=[reranker, priority_pp],
-        )
