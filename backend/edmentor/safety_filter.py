@@ -6,13 +6,14 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     """
     Cleans response text for natural voice synthesis:
     - Strips markdown formatting (headers, lists, bold).
-    - Removes common AI filler words.
+    - Strips any line starting with * or containing ###.
     - Limits response length to max_words, cutting strictly at the last complete sentence boundary.
+    - If output is empty after stripping, replaces with default question.
     """
     if not text:
-        return ""
+        return "Can you tell me a bit more about what you're working on?"
 
-    # Strip any line starting with * or containing ###
+    # 1. Strip any line starting with * or containing ###
     lines = text.split("\n")
     cleaned_lines = []
     for line in lines:
@@ -22,6 +23,7 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
         cleaned_lines.append(line)
     text = "\n".join(cleaned_lines)
 
+    # 2. Strip any markdown
     # Remove fenced code blocks entirely
     text = re.sub(r"```[\s\S]*?```", "", text)
 
@@ -34,11 +36,11 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     text = re.sub(r"_{1,3}(.*?)_{1,3}", r"\1", text)
     text = text.replace("*", "").replace("_", "")
 
-    # Remove ATX headers
+    # Remove ATX headers (like # ## ###)
     text = re.sub(r"^\s*#{1,6}\s+", "", text, flags=re.MULTILINE)
     text = text.replace("#", "")
 
-    # Convert numbered lists to natural flow
+    # Convert/remove numbered lists
     text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
 
     # Remove dash/asterisk bullet points
@@ -63,6 +65,9 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     text = re.sub(r'^[,\s.!?]+', '', text).strip()
     
+    if not text:
+        return "Can you tell me a bit more about what you're working on?"
+
     # Truncate at max_words, cutting at the last complete sentence boundary
     words = text.split()
     if len(words) <= max_words:
@@ -91,3 +96,4 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
         text = " ".join(words[:max_words]) + "."
         
     return text.strip()
+
