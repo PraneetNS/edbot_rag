@@ -47,11 +47,10 @@ def get_chroma_resources():
     """Initializes and returns Chroma DB collection and embedding model."""
     global _client, _collection, _embedder
     if _client is None:
-        backend_dir = Path(__file__).resolve().parent.parent
-        chroma_path = backend_dir.parent / "edumentor_chroma"
-        _client = chromadb.PersistentClient(path=str(chroma_path))
+        from rag.config import CHROMA_PERSIST_DIR, CHROMA_COLLECTION_NAME
+        _client = chromadb.PersistentClient(path=str(CHROMA_PERSIST_DIR))
         _collection = _client.get_or_create_collection(
-            name="edumentor_mentor",
+            name=CHROMA_COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"}
         )
     if _embedder is None:
@@ -62,8 +61,8 @@ def get_chroma_resources():
 async def retrieve_chunks(query: str, k: int = 3) -> list[str]:
     """
     Retrieves top-k chunk texts (mentor answers) from ChromaDB collection.
-    Applies query expansion first.
-    Filters out chunks with similarity below 0.15 (cosine distance > 0.85).
+    Filters out chunks with similarity below 0.45 (cosine distance > 0.55).
+    If zero chunks pass the threshold, returns empty list.
     """
     try:
         collection, embedder = get_chroma_resources()
@@ -71,26 +70,21 @@ async def retrieve_chunks(query: str, k: int = 3) -> list[str]:
         logger.error(f"Error loading Chroma or embedder model: {e}")
         return []
 
-    # Apply query expansion
-    expanded = expand_query(query)
-    query_prefix = f"Student: {expanded}"
-
-    # Embed the query
+    # Embed the query directly (no expansion, no Student: prefix)
     loop = asyncio.get_running_loop()
     embedding = await loop.run_in_executor(
         None, 
-        lambda: embedder.encode(query_prefix, normalize_embeddings=True)
+        lambda: embedder.encode(query, normalize_embeddings=True)
     )
     if hasattr(embedding, "tolist"):
         q_embedding = embedding.tolist()
     else:
         q_embedding = list(embedding)
 
-    # Retrieve top-k (overfetch a bit so we can filter by threshold)
-    # Filter only for Edumentor Dataset source
+    # Retrieve top-k
     results = collection.query(
         query_embeddings=[q_embedding],
-        n_results=k * 2,
+        n_results=k,
         where={"source": "Edumentor Dataset"},
         include=["documents", "metadatas", "distances"]
     )
@@ -101,9 +95,13 @@ async def retrieve_chunks(query: str, k: int = 3) -> list[str]:
     retrieved = results["documents"][0]
     distances = results["distances"][0]
 
-    # Filter by similarity threshold 0.15 (dist <= 0.85)
-    valid_chunks = [doc for doc, dist in zip(retrieved, distances) if dist <= 0.85]
-    return valid_chunks[:k]
+    # Filter by minimum relevance score threshold 0.45 (similarity = 1.0 - dist >= 0.45)
+    valid_chunks = []
+    for doc, dist in zip(retrieved, distances):
+        similarity = 1.0 - dist
+        if similarity >= 0.45:
+            valid_chunks.append(doc)
+    return valid_chunks
 
 def build_qwen_prompt(chunks: list[str], query: str) -> str:
     """
@@ -137,47 +135,50 @@ def is_ambiguous_or_context_free(query: str) -> bool:
 async def rag_retrieve_and_respond(query: str, llm_model=None, tokenizer=None, k: int = 3) -> str:
     """
     RAG retrieval and response generation.
-    Bypasses external LLMs. Fallback to direct RAG answer if Qwen is offline.
+    Always synthesizes the response using the LLM.
     """
     chunks = await retrieve_chunks(query, k=k)
     
-    # Check if Qwen is available
+    # Build prompt exactly as instructed
+    if chunks:
+        # Take up to top 2 retrieved chunks as specified in prompt template:
+        # {chunk_1_text}
+        # {chunk_2_text}
+        chunk_texts = [f"{c}" for c in chunks[:2]]
+        knowledge_str = "\n".join(chunk_texts)
+        prompt = (
+            "You are EduMentor, a direct senior engineer mentoring an Indian "
+            "engineering student. Speak casually, 2-3 sentences max, no markdown.\n\n"
+            "Relevant knowledge:\n"
+            f"{knowledge_str}\n\n"
+            f"Student asks: {query}\n\n"
+            "Answer by synthesising the knowledge above into a natural spoken reply. "
+            "Do NOT copy the knowledge verbatim. Do NOT use bullet points or lists."
+        )
+    else:
+        prompt = (
+            "You are EduMentor, a direct senior engineer mentoring an Indian "
+            "engineering student. Speak casually, 2-3 sentences max, no markdown.\n\n"
+            f"Student asks: {query}\n\n"
+            "Answer from your general knowledge as a mentor. Stay on-domain "
+            "(DSA, placements, internships, resume, career, projects). "
+            "If completely off-domain, say: \"That's outside what I focus on. "
+            "Ask me about DSA, placements, or your career instead.\""
+        )
+        
     from edmentor.qwen_client import qwen_client
     if qwen_client.is_available():
-        if not chunks:
-            # Fallback path when RAG fails to find relevant chunks but LLM is available
-            if is_ambiguous_or_context_free(query):
-                return "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
-                
-            system_prompt = "You are Edmentor, a senior engineering mentor."
-            prompt = (
-                "Answer the student's question using your own knowledge as a senior engineering mentor. "
-                "Do not use markdown, bullet points, or list formatting. Keep the response natural, spoken, and under 75 words.\n\n"
-                f"Student Question: {query}"
-            )
-            response_raw = await qwen_client.generate(prompt, system_prompt=system_prompt)
-        else:
-            prompt = build_qwen_prompt(chunks, query)
+        try:
             response_raw = await qwen_client.generate(prompt)
-        return edumentor_filter(response_raw, max_words=75)
-
-    # Fallback to direct top chunk answer when Qwen is offline
-    if not chunks:
-        if is_ambiguous_or_context_free(query):
-            return "That's a bit outside what I've seen most. Can you give me more context on where you're at?"
+            # Run the new post-processing safety filter
+            return edumentor_filter(response_raw)
+        except Exception as e:
+            logger.error(f"Error during LLM generation: {e}")
             
-        offline_fallback = (
-            "I am EduMentor. I currently do not have enough verified context in my knowledge base to answer this question. "
-            "However, as a senior mentor, I suggest looking into official documentation and academic roadmaps to guide your research."
-        )
-        return edumentor_filter(offline_fallback, max_words=75)
+    # If LLM is offline, return a friendly synthesized message in the mentor's voice
+    offline_response = (
+        "I am EduMentor. My LLM brain seems to be offline right now. "
+        "Double check that Ollama is running on your system so I can synthesize a reply."
+    )
+    return edumentor_filter(offline_response)
 
-    top_chunk = chunks[0]
-    
-    # Strip any potential prefix if it has one
-    if "Mentor:" in top_chunk:
-        response = top_chunk.split("Mentor:", 1)[1].strip()
-    else:
-        response = top_chunk.strip()
-        
-    return edumentor_filter(response, max_words=75)
