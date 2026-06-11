@@ -227,91 +227,161 @@ def check_ollama_active() -> bool:
     except Exception:
         return False
 
+# ── Section-aware tone hints ──────────────────────────────────────────────────
+_SECTION_TONE_HINTS = {
+    "mindset_support": (
+        "The student is emotionally struggling. Lead with validation (1 sentence), "
+        "then reframe, then one action. Be human, not motivational-poster."
+    ),
+    "placement_timelines": (
+        "Be specific about timing. Name actual topics or platforms. "
+        "Don't say 'study hard' — say what to study and when."
+    ),
+    "company_patterns": (
+        "Be specific to the company they asked about. Name the actual round structure, "
+        "what they test, what gets people rejected."
+    ),
+    "career_roadmaps": (
+        "Don't give the full roadmap in voice. Give the single most important starting "
+        "point and one milestone. Offer to go deeper on any phase if they want."
+    ),
+    "higher_studies": (
+        "Be honest about the financial reality and ROI. Don't romanticise MS abroad or "
+        "dismiss it. Give your honest mentor take."
+    ),
+}
+
+_BASE_SYSTEM = """\
+You are EduMentor — a senior software engineer and mentor for Indian engineering \
+students (2nd to 4th year). You speak exactly like a real person: casual, direct, \
+occasionally blunt, always warm. You have lived through placements, internships, \
+DSA grind, burnout — all of it.
+
+STRICT VOICE RULES:
+- Reply in 2-3 sentences maximum. Never more.
+- No bullet points. No numbered lists. No markdown. No headers.
+- Write exactly how you would speak out loud.
+- Use casual English — contractions, "yeah", "look", "honestly" are fine.
+- Never start your reply with "I", "Sure", "Great question", "Absolutely".
+- If the student sounds anxious or burnt out, acknowledge it in one sentence before answering.
+- Give ONE concrete next step, not a full plan.
+- Do NOT copy the knowledge context verbatim. Use it to inform your answer, \
+then say it in your own mentor voice.\
+"""
+
+
+def _merge_by_id(nodes: list) -> list[str]:
+    """
+    Section-aware deduplication: merge nodes sharing the same entry id.
+    Returns merged context strings (max 3).
+    """
+    grouped: dict = {}
+    for nws in nodes:
+        eid = nws.node.metadata.get("id", nws.node.node_id)
+        if eid in grouped:
+            grouped[eid] += " " + nws.node.text
+        else:
+            grouped[eid] = nws.node.text
+    return list(grouped.values())[:3]  # max 3 merged contexts
+
+
 class EduMentorRAGQueryEngine:
     """
-    Unified query engine for EduMentor that executes exact 0.45 threshold filtering,
-    prompt synthesis, and LLM generation.
+    Unified query engine for EduMentor.
+    - similarity_top_k = 4
+    - Relevance score threshold = 0.42
+    - Section-aware merge_by_id deduplication before LLM
     """
     def __init__(self, index: VectorStoreIndex, is_5k: bool = False):
         self.index = index
         self.is_5k = is_5k
-        
+
     def query(self, query_str: str) -> QueryResponse:
-        from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
-        filters = MetadataFilters(
-            filters=[
-                MetadataFilter(
-                    key="source",
-                    value="Edumentor Dataset",
-                    operator=FilterOperator.EQ,
-                )
-            ]
-        )
-        # Fetch similarity_top_k = 3
-        retriever = self.index.as_retriever(similarity_top_k=3, filters=filters)
+        # Fetch single best matching chunk (RAG-only mode)
+        retriever = self.index.as_retriever(similarity_top_k=1)
         nodes = retriever.retrieve(query_str)
-        
-        # Filter by threshold 0.45 (1.0 - dist >= 0.45)
-        valid_nodes = []
+
+        # Filter by threshold 0.42
+        filtered = []
         for nws in nodes:
             dist = nws.score if nws.score is not None else 1.0
             similarity = 1.0 - dist
-            if similarity >= 0.45:
-                nws.score = similarity # normalize score to similarity
-                valid_nodes.append(nws)
-                
-        # Build prompt exactly as instructed
-        if valid_nodes:
-            chunk_texts = [f"{nws.node.text}" for nws in valid_nodes[:2]]
-            knowledge_str = "\n".join(chunk_texts)
-            prompt = (
-                "You are EduMentor, a direct senior engineer mentoring an Indian "
-                "engineering student. Speak casually, 2-3 sentences max, no markdown.\n\n"
-                "Relevant knowledge:\n"
-                f"{knowledge_str}\n\n"
-                f"Student asks: {query_str}\n\n"
-                "Answer by synthesising the knowledge above into a natural spoken reply. "
-                "Do NOT copy the knowledge verbatim. Do NOT use bullet points or lists."
-            )
-        else:
-            prompt = (
-                "You are EduMentor, a direct senior engineer mentoring an Indian "
-                "engineering student. Speak casually, 2-3 sentences max, no markdown.\n\n"
-                f"Student asks: {query_str}\n\n"
-                "Answer from your general knowledge as a mentor. Stay on-domain "
-                "(DSA, placements, internships, resume, career, projects). "
-                "If completely off-domain, say: \"That's outside what I focus on. "
-                "Ask me about DSA, placements, or your career instead.\""
-            )
-            
-        response_text = ""
-        if check_ollama_active():
-            import requests
-            payload = {
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3
-                }
-            }
+            if similarity >= 0.42:
+                nws.score = similarity
+                filtered.append(nws)
+
+        # ── RAG-only mode: return top-1 chunk as concise mentor advice ──────
+        if filtered:
+            raw = filtered[0].node.text
+            top_section = filtered[0].node.metadata.get("section")
             try:
-                r = requests.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=60)
-                if r.status_code == 200:
-                    response_text = r.json().get("response", "").strip()
-            except Exception as e:
-                logger.error(f"Error calling Ollama: {e}")
+                from edmentor.rag_engine import (
+                    _extract_mentor_lines,
+                    _SECTION_INTROS,
+                    _SECTION_OUTROS,
+                    _GENERAL_INTROS,
+                    _GENERAL_OUTROS,
+                )
+                import random
+                mentor_text = _extract_mentor_lines(raw)
                 
-        if not response_text:
-            response_text = (
-                "I am EduMentor. My LLM brain is currently offline. "
-                "Double check that Ollama is running on your system so I can synthesize a reply."
-            )
-            
-        from edmentor.safety_filter import edumentor_filter
-        response_text = edumentor_filter(response_text)
-        
-        return QueryResponse(response_text, valid_nodes)
+                intros = _SECTION_INTROS.get(top_section, _GENERAL_INTROS) if top_section else _GENERAL_INTROS
+                outros = _SECTION_OUTROS.get(top_section, _GENERAL_OUTROS) if top_section else _GENERAL_OUTROS
+                
+                intro = random.choice(intros)
+                outro = random.choice(outros)
+                
+                if not any(greet in mentor_text.lower()[:15] for greet in ["hey", "hello", "hi", "look", "listen", "alright"]):
+                    mentor_text = f"{intro}{mentor_text}{outro}"
+                else:
+                    mentor_text = f"{mentor_text}{outro}"
+            except Exception as e:
+                # Fallback to simple trim if import or extraction fails
+                words = raw.split()
+                mentor_text = " ".join(words[:100])
+                if len(words) > 100 and "." in mentor_text:
+                    mentor_text = mentor_text[:mentor_text.rfind(".")+1]
+            return QueryResponse(mentor_text.strip(), filtered[:1])
+
+        # No chunks retrieved above threshold
+        return QueryResponse(
+            "Hmm, I don't have anything in my notes on that. "
+            "Ask me about DSA, placements, internships, resume, or your career — that's where I can actually help.",
+            []
+        )
+
+        # ── Ollama LLM synthesis (disabled — uncomment to re-enable) ─────────
+        # top_section: str | None = filtered[0].node.metadata.get("section") if filtered else None
+        # system = _BASE_SYSTEM
+        # if top_section and top_section in _SECTION_TONE_HINTS:
+        #     system += "\n\n" + _SECTION_TONE_HINTS[top_section]
+        # if filtered:
+        #     merged_context = "\n\n".join(_merge_by_id(filtered))
+        #     user_prompt = (
+        #         f"Knowledge context (use this to inform your answer, do not quote it directly):\n{merged_context}\n\n"
+        #         f"Student says: \"{query_str}\"\n\nReply as EduMentor in 2-3 spoken sentences."
+        #     )
+        # else:
+        #     user_prompt = (
+        #         f"Student says: \"{query_str}\"\n\n"
+        #         "You don't have specific reference material. Answer from your experience as a senior engineer."
+        #     )
+        # response_text = ""
+        # if check_ollama_active():
+        #     import requests
+        #     try:
+        #         r = requests.post(f"{OLLAMA_BASE_URL}/api/generate",
+        #             json={"model": OLLAMA_MODEL, "prompt": user_prompt,
+        #                   "system": system, "stream": False, "options": {"temperature": 0.3}},
+        #             timeout=60)
+        #         if r.status_code == 200:
+        #             response_text = r.json().get("response", "").strip()
+        #     except Exception as e:
+        #         logger.error(f"Error calling Ollama: {e}")
+        # if not response_text:
+        #     response_text = "Looks like my LLM brain is offline — make sure Ollama is running and try again."
+        # from edmentor.safety_filter import edumentor_filter
+        # return QueryResponse(edumentor_filter(response_text), filtered)
 
 def get_edumentor_query_engine(index: VectorStoreIndex):
     """Returns the custom EduMentor Query Engine."""
@@ -337,15 +407,14 @@ def load_rag_index_5k() -> VectorStoreIndex:
     return index
 
 
-def get_edmentor_retriever(topic: str = "General", top_k: int = 3):
+def get_edmentor_retriever(topic: str = "General", top_k: int = 4):
     """
     Returns a retriever for the edumentor_knowledge collection.
+    top_k defaults to 4 (increased for split-entry retrieval headroom).
     """
-    from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
-
     chroma_manager = ChromaManager(
         persist_dir=CHROMA_PERSIST_DIR,
-        collection_name=CHROMA_COLLECTION_NAME, # Main collection
+        collection_name=CHROMA_COLLECTION_NAME,
     )
     vector_store = chroma_manager.get_vector_store()
     embed_model  = get_cached_embed_model()
@@ -354,27 +423,15 @@ def get_edmentor_retriever(topic: str = "General", top_k: int = 3):
         embed_model=embed_model,
     )
 
-    filters_list = [
-        MetadataFilter(
-            key="source",
-            value="Edumentor Dataset",
-            operator=FilterOperator.EQ,
-        )
-    ]
-    
-    filters = MetadataFilters(filters=filters_list)
-    retriever = index.as_retriever(
-        similarity_top_k=top_k,
-        filters=filters,
-    )
-    logger.info(f"EdmentorRetriever: source filter='Edumentor Dataset', top_k={top_k}")
+    retriever = index.as_retriever(similarity_top_k=top_k)
+    logger.info(f"EdmentorRetriever: top_k={top_k}")
     return retriever
 
 
-def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int = 3) -> List[str]:
+def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int = 4) -> List[str]:
     """
     Retrieves top-k chunk texts for a query + topic.
-    Applies the exact 0.45 similarity threshold (dist <= 0.55).
+    Applies the 0.42 similarity threshold.
     """
     retriever = get_edmentor_retriever(topic=topic, top_k=top_k)
     nodes = retriever.retrieve(query)
@@ -383,7 +440,7 @@ def retrieve_chunks_for_edmentor(query: str, topic: str = "General", top_k: int 
     for nws in nodes:
         dist = nws.score if nws.score is not None else 1.0
         similarity = 1.0 - dist
-        if similarity >= 0.45:
+        if similarity >= 0.42:
             valid_nodes.append(nws)
 
     return [nws.node.text for nws in valid_nodes[:top_k]]
