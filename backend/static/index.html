@@ -684,6 +684,16 @@ let recognition   = null;
 let silenceTimer  = null;
 let currentUtterance = null;
 
+// Speech queue & text reveal state variables
+let speechQueue     = [];
+let isSpeakingQueue = false;
+let revealedText    = "";
+let streamClosed    = false;
+let currentBubbleEl = null;
+let currentPlayBtn  = null;
+let revealQueue     = [];
+let revealTimer     = null;
+
 function _newSessionId() {
   const id = 'em_' + Math.random().toString(36).slice(2,9) + '_' + Date.now();
   localStorage.setItem(SESSION_KEY, id);
@@ -714,6 +724,14 @@ const waveform     = document.getElementById('waveform');
 
 // ── Startup ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  // Pre-warm SpeechSynthesis voices
+  if (window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => {
+      window.speechSynthesis.getVoices();
+    };
+  }
+
   updateMuteUI();
   checkHealth();
   setInterval(checkHealth, 15000);
@@ -980,6 +998,20 @@ async function sendMessage() {
     const botPlaceholder = { role: 'bot', text: '', time: timeStr, topic: '', duration: '' };
     const botRow = appendBubble(botPlaceholder);
     const bubbleEl = botRow.querySelector('.bubble');
+    bubbleEl.innerText = ''; // Ensure it starts empty
+
+    // Reset queue state for this stream
+    speechQueue = [];
+    isSpeakingQueue = false;
+    revealedText = "";
+    streamClosed = false;
+    currentBubbleEl = bubbleEl;
+    currentPlayBtn = null;
+    revealQueue = [];
+    if (revealTimer) {
+      clearInterval(revealTimer);
+      revealTimer = null;
+    }
 
     hideTyping();
 
@@ -989,15 +1021,25 @@ async function sendMessage() {
     let fullText = '';
 
     eventSource.addEventListener('text', (e) => {
-      // Append new sentence directly (grows sentence by sentence)
-      bubbleEl.innerText += e.data + " ";
-      fullText += e.data + " ";
-      scrollBottom();
+      const sentence = e.data.trim();
+      if (!sentence) return;
+
+      fullText += sentence + " ";
+
+      // Feed visual reveal queue
+      const words = sentence.split(/\s+/).filter(Boolean);
+      revealQueue.push(...words);
+      startReveal(bubbleEl);
+
+      if (!isMuted) {
+        // Feed Speech Queue for background voice
+        speechQueue.push(sentence);
+        processSpeechQueue(null);
+      }
     });
 
     eventSource.addEventListener('audio', (e) => {
-      // Queue audio for sequential gapless playback
-      queueAudio(e.data);
+      // Bypassed: backend audio events are ignored in favor of browser-native SpeechSynthesis
     });
 
     eventSource.addEventListener('done', (e) => {
@@ -1031,11 +1073,24 @@ async function sendMessage() {
           <span class="duration-badge">${duration}</span>
           <button class="btn-play" title="Play response">▶</button>
         `;
-        metaEl.querySelector('.btn-play').addEventListener('click', () =>
-          speakText(fullText.trim(), metaEl.querySelector('.btn-play'))
+        const playBtn = metaEl.querySelector('.btn-play');
+        playBtn.addEventListener('click', () =>
+          speakText(fullText.trim(), playBtn)
         );
+
+        // If SpeechSynthesis is still speaking, link this button to active queue
+        if (isSpeakingQueue || speechQueue.length > 0) {
+          playBtn.classList.add('playing');
+          currentPlayBtn = playBtn;
+        }
       }
       scrollBottom();
+
+      streamClosed = true;
+      // If we are muted or already done speaking and finished typing, deactivate waveform
+      if (isMuted || (!isSpeakingQueue && speechQueue.length === 0 && revealQueue.length === 0)) {
+        waveform.classList.remove('active');
+      }
     }
 
   } catch (err) {
@@ -1066,96 +1121,148 @@ function estimateDuration(text) {
 }
 
 // ── TTS (Text-to-Speech) ─────────────────────────────────────────────────
+function startReveal(bubbleEl) {
+  if (revealTimer) return;
+
+  const speed = isMuted ? 50 : 75;
+  revealTimer = setInterval(() => {
+    if (revealQueue.length === 0) {
+      if (streamClosed) {
+        clearInterval(revealTimer);
+        revealTimer = null;
+      }
+      return;
+    }
+
+    const word = revealQueue.shift();
+    revealedText += (revealedText ? " " : "") + word;
+    bubbleEl.innerText = revealedText;
+    scrollBottom();
+  }, speed);
+}
+
 async function speakText(text, btn) {
   if (isMuted) return;
 
-  // Stop any current speech
+  // Stop any current speech and reveal timers
   stopSpeaking();
 
-  // Mark button as playing
-  document.querySelectorAll('.btn-play.playing').forEach(b => b.classList.remove('playing'));
-  if (btn) btn.classList.add('playing');
-  waveform.classList.add('active');
+  const bodyEl = btn.closest('.msg-body');
+  if (!bodyEl) return;
+  const bubbleEl = bodyEl.querySelector('.bubble');
+  if (!bubbleEl) return;
 
-  // Try backend Kokoro TTS first
-  try {
-    const res = await fetch(`${API_BASE}/edmentor/tts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
+  // Reset state for replay reveal
+  revealQueue = [];
+  revealedText = "";
+  streamClosed = true;
+  if (revealTimer) {
+    clearInterval(revealTimer);
+    revealTimer = null;
+  }
 
-    if (res.ok) {
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('audio')) {
-        const blob = await res.blob();
-        const url  = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentPlayingAudio = audio;
-        isPlayingAudio = true;
-        
-        audio.onended = () => {
-          waveform.classList.remove('active');
-          if (btn) btn.classList.remove('playing');
-          URL.revokeObjectURL(url);
-          currentPlayingAudio = null;
-          isPlayingAudio = false;
-        };
-        audio.onerror = () => {
-          waveform.classList.remove('active');
-          if (btn) btn.classList.remove('playing');
-          URL.revokeObjectURL(url);
-          currentPlayingAudio = null;
-          isPlayingAudio = false;
-          _browserTTS(text, btn);
-        };
-        audio.play();
-        return;
-      }
-    }
-  } catch { /* fall through */ }
+  // Split text into words and push to revealQueue
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  revealQueue.push(...words);
 
-  // Browser SpeechSynthesis fallback
-  _browserTTS(text, btn);
+  // Clear bubble text to start word-by-word reveal
+  bubbleEl.innerText = "";
+
+  // Reset speech queue for replay speech
+  speechQueue = [];
+  isSpeakingQueue = false;
+
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  for (const s of sentences) {
+    const ts = s.trim();
+    if (ts) speechQueue.push(ts);
+  }
+
+  // Start both typing reveal and voice playback in parallel
+  startReveal(bubbleEl);
+  processSpeechQueue(btn);
 }
 
-function _browserTTS(text, btn) {
-  if (!window.speechSynthesis) {
-    waveform.classList.remove('active');
-    if (btn) btn.classList.remove('playing');
+function processSpeechQueue(btn) {
+  if (isSpeakingQueue) return;
+  if (speechQueue.length === 0) {
+    if (streamClosed) {
+      waveform.classList.remove('active');
+      if (btn) btn.classList.remove('playing');
+      if (currentPlayBtn) currentPlayBtn.classList.remove('playing');
+    }
     return;
   }
 
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.rate  = 0.92;
+  isSpeakingQueue = true;
+  waveform.classList.add('active');
+  if (btn) {
+    btn.classList.add('playing');
+    currentPlayBtn = btn;
+  }
+
+  const sentence = speechQueue.shift();
+  const utter = new SpeechSynthesisUtterance(sentence);
+  utter.rate = 0.95;
   utter.pitch = 1.0;
 
-  // Pick a decent voice if available
+  // Pick best English voice
   const voices = window.speechSynthesis.getVoices();
-  const preferred = voices.find(v =>
-    v.name.toLowerCase().includes('samantha') ||
-    v.name.toLowerCase().includes('daniel') ||
-    v.name.toLowerCase().includes('karen') ||
-    v.lang === 'en-US'
-  );
+  const preferred = voices.find(v => v.name.toLowerCase().includes('natural') && v.lang.startsWith('en')) ||
+                    voices.find(v => v.name.toLowerCase().includes('google us english')) ||
+                    voices.find(v => v.name.toLowerCase().includes('google')) ||
+                    voices.find(v => v.name.toLowerCase().includes('samantha')) ||
+                    voices.find(v => v.name.toLowerCase().includes('microsoft david')) ||
+                    voices.find(v => v.name.toLowerCase().includes('microsoft zira')) ||
+                    voices.find(v => v.lang.startsWith('en-US')) ||
+                    voices.find(v => v.lang.startsWith('en'));
   if (preferred) utter.voice = preferred;
 
   utter.onend = () => {
-    waveform.classList.remove('active');
-    if (btn) btn.classList.remove('playing');
+    isSpeakingQueue = false;
+    currentUtterance = null;
+    processSpeechQueue(btn);
   };
-  utter.onerror = () => {
-    waveform.classList.remove('active');
-    if (btn) btn.classList.remove('playing');
+
+  utter.onerror = (e) => {
+    console.error('Speech synthesis error:', e);
+    isSpeakingQueue = false;
+    currentUtterance = null;
+    processSpeechQueue(btn);
   };
 
   currentUtterance = utter;
   window.speechSynthesis.speak(utter);
 }
 
+function _browserTTS(text, btn) {
+  speakText(text, btn);
+}
+
 function stopSpeaking() {
-  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
   stopPlayingAudio();
+  speechQueue = [];
+  isSpeakingQueue = false;
+
+  // Clear reveal state
+  revealQueue = [];
+  revealedText = "";
+  streamClosed = true;
+  if (revealTimer) {
+    clearInterval(revealTimer);
+    revealTimer = null;
+  }
+
+  currentUtterance = null;
+  currentBubbleEl = null;
+  if (currentPlayBtn) {
+    currentPlayBtn.classList.remove('playing');
+    currentPlayBtn = null;
+  }
+  waveform.classList.remove('active');
 }
 
 // ── Mute toggle ───────────────────────────────────────────────────────────

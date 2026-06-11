@@ -64,7 +64,7 @@ class TestEdmentorRoutingPipeline(unittest.IsolatedAsyncioTestCase):
         full_text = f"{s1} {s2} {s3}"
         self.assertEqual(len(full_text.split()), 80)
         
-        trimmed = edumentor_filter(full_text)
+        trimmed = edumentor_filter(full_text, max_words=75)
         trimmed_words = trimmed.split()
         
         print(f"Original word count: 80")
@@ -85,12 +85,17 @@ class TestEdmentorRoutingPipeline(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Tell me what you are working on", response)
 
     @patch('edmentor.rag_engine.get_chroma_resources')
-    async def test_rag_direct_response(self, mock_get_chroma):
+    @patch('edmentor.qwen_client.qwen_client.is_available')
+    @patch('edmentor.qwen_client.qwen_client.generate')
+    async def test_rag_direct_response(self, mock_generate, mock_is_available, mock_get_chroma):
         print("\n--- Testing Direct RAG Retrieval Response ---")
+        mock_is_available.return_value = True
+        mock_generate.return_value = "Start with a base case, then write the recursive call."
         # Mock ChromaDB query return value
         mock_col = MagicMock()
         mock_col.query.return_value = {
             "documents": [["Student: explain recursion\nMentor: Start with a base case, then write the recursive call."]],
+            "metadatas": [[{"section": "dsa_concepts", "id": "dsa_001"}]],
             "distances": [[0.1]]
         }
         mock_embedder = MagicMock()
