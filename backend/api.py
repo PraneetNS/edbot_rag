@@ -738,16 +738,8 @@ def _edmentor_not_ready_response(question: str) -> EdmentorResponse:
 
 
 async def generate_tts_async(text: str) -> str:
-    from edmentor.tts_router import _try_kokoro
-    import base64
-    import asyncio
-    loop = asyncio.get_running_loop()
-    def run_tts():
-        audio_bytes, _ = _try_kokoro(text, "af_heart", 0.95)
-        if audio_bytes:
-            return base64.b64encode(audio_bytes).decode("utf-8")
-        return ""
-    return await loop.run_in_executor(None, run_tts)
+    # Bypassed to use client-side SpeechSynthesis (Web Speech API)
+    return ""
 
 
 @app.post("/edmentor/query", response_model=EdmentorResponse)
