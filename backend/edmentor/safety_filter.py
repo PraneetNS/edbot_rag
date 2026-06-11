@@ -1,58 +1,88 @@
+"""
+edmentor/safety_filter.py
+─────────────────────────
+Post-processing pipeline for every LLM output.
+
+Executed in order:
+  Step 1 — Strip template leaks
+  Step 2 — Strip markdown
+  Step 3 — Sentence-boundary word cap (max 60 words) via cap_for_voice()
+  Step 4 — Empty guard
+"""
+
 import re
 
-MAX_WORDS = 60  # voice contract is 60 words / 80 tokens
+MAX_WORDS = 60
+
+
+# ── Step 3 helper ─────────────────────────────────────────────────────────────
+
+def cap_for_voice(text: str, max_words: int = MAX_WORDS) -> str:
+    """
+    Truncate text to max_words while respecting sentence boundaries.
+    Prefers cutting at a sentence-end (.!?), then at a comma,
+    then hard-truncates if neither is available.
+    """
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+
+    truncated = ' '.join(words[:max_words])
+    match = re.search(r'[.!?][^.!?]*$', truncated)
+    if match:
+        return truncated[:match.start() + 1].strip()
+    last_comma = truncated.rfind(',')
+    if last_comma > len(truncated) // 2:
+        return truncated[:last_comma].strip()
+    return truncated.strip()
+
+
+# ── Main filter ───────────────────────────────────────────────────────────────
 
 def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     """
-    Cleans response text for natural voice synthesis:
-    - Strips markdown formatting (headers, lists, bold).
-    - Strips any line starting with * or containing ###.
-    - Limits response length to max_words, cutting strictly at the last complete sentence boundary.
-    - If output is empty after stripping, replaces with default question.
+    Full post-processing pipeline for EduMentor LLM output.
+    Safe to call on any string; returns a clean, voice-ready response.
     """
-    if not text:
+    if not text or not text.strip():
         return "Can you tell me a bit more about what you're working on?"
 
-    # 1. Strip any line starting with * or containing ###
-    lines = text.split("\n")
-    cleaned_lines = []
-    for line in lines:
-        stripped_line = line.strip()
-        if stripped_line.startswith("*") or "###" in stripped_line:
-            continue
-        cleaned_lines.append(line)
-    text = "\n".join(cleaned_lines)
+    # ── Step 1: Strip template leaks ─────────────────────────────────────────
+    template_patterns = [
+        r'\*(EduMentor.*?)\*',
+        r'###\s.*?\n',
+        r'\*(Retrieved from.*?)\*',
+        r'Knowledge context.*?Student says:',
+        r'Reply as EduMentor.*',
+    ]
+    for p in template_patterns:
+        text = re.sub(p, '', text, flags=re.DOTALL | re.IGNORECASE)
 
-    # 2. Strip any markdown
-    # Remove fenced code blocks entirely
-    text = re.sub(r"```[\s\S]*?```", "", text)
+    # ── Step 2: Strip markdown ────────────────────────────────────────────────
+    # Bold
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    # Inline code
+    text = re.sub(r'`[^`]+`', '', text)
+    # Fenced code blocks
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    # Headers (# ## ### ####)
+    text = re.sub(r'(?m)^#{1,4}\s.*$', '', text)
+    # Bullet points
+    text = re.sub(r'(?m)^\s*[-*•]\s+', '', text)
+    text = re.sub(r'\n\s*[-*•]\s+', ' ', text)
+    # Numbered lists
+    text = re.sub(r'(?m)^\s*\d+\.\s+', '', text)
 
-    # Remove inline code
-    text = re.sub(r"`[^`]+`", lambda m: m.group(0).strip("`"), text)
-    text = text.replace("`", "")
+    # Extra: strip any remaining bold/italic markers and standalone #
+    text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
+    text = re.sub(r'_{1,3}(.*?)_{1,3}', r'\1', text)
+    text = text.replace('*', '').replace('#', '')
 
-    # Remove bold/italic markers
-    text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
-    text = re.sub(r"_{1,3}(.*?)_{1,3}", r"\1", text)
-    text = text.replace("*", "").replace("_", "")
+    # Strip parenthetical source refs
+    text = re.sub(r'\(Source:.*?\)', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[Source:.*?\]', '', text, flags=re.IGNORECASE)
 
-    # Remove ATX headers (like # ## ###)
-    text = re.sub(r"^\s*#{1,6}\s+", "", text, flags=re.MULTILINE)
-    text = text.replace("#", "")
-
-    # Convert/remove numbered lists
-    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
-
-    # Remove dash/asterisk bullet points
-    text = re.sub(r"^\s*[-*•]\s+", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\n\s*[-*•]\s+", " ", text)
-
-    # Remove parenthetical meta-tags or reference source lines
-    text = re.sub(r"\*\(.*?\)\*", "", text)
-    text = re.sub(r"\(Source:.*?\)", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\[Source:.*?\]", "", text, flags=re.IGNORECASE)
-    
-    # Remove AI filler phrases
+    # Remove AI filler phrases (retained from original functionality for test compatibility)
     fillers = [
         "great question", "certainly", "sure!", "absolutely", 
         "of course", "i'd be happy to", "as an ai", "sure"
@@ -60,40 +90,16 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     for f in fillers:
         pattern = r'\b' + re.escape(f) + r'\b[,.!?]?'
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-        
-    # Standardize whitespace and remove leftover punctuation artifacts at the beginning
+
+    # Normalize whitespace
     text = re.sub(r'\s+', ' ', text).strip()
     text = re.sub(r'^[,\s.!?]+', '', text).strip()
-    
-    if not text:
-        return "Can you tell me a bit more about what you're working on?"
 
-    # Truncate at max_words, cutting at the last complete sentence boundary
-    words = text.split()
-    if len(words) <= max_words:
-        return text.strip()
-        
-    # Split text into sentences using lookbehind to preserve sentence termination marks
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    
-    accumulated_sentences = []
-    current_word_count = 0
-    
-    for sentence in sentences:
-        sentence_words = sentence.split()
-        if not sentence_words:
-            continue
-        if current_word_count + len(sentence_words) <= max_words:
-            accumulated_sentences.append(sentence)
-            current_word_count += len(sentence_words)
-        else:
-            break
-            
-    if accumulated_sentences:
-        text = " ".join(accumulated_sentences)
-    else:
-        # Last-resort fallback: truncate at exactly max_words if the first sentence exceeds the limit
-        text = " ".join(words[:max_words]) + "."
-        
+    # ── Step 3: Sentence-boundary word cap ───────────────────────────────────
+    text = cap_for_voice(text, max_words=max_words)
+
+    # ── Step 4: Empty guard ───────────────────────────────────────────────────
+    if not text.strip():
+        text = "Can you tell me a bit more about what you're working on?"
+
     return text.strip()
-
