@@ -155,3 +155,31 @@ class DomainGuard:
 
 # Module-level singleton
 guard = DomainGuard()
+
+# ── Identity check (LangChain Rebuild) ────────────────────────────────────────
+def check_identity(text: str) -> bool:
+    q = text.lower().strip().rstrip("?.!")
+    probing_keywords = [
+        "chatgpt", "gemini", "claude", "ai assistant", "general chatbot", 
+        "chatbot", "who are you", "your name", "introduce yourself", 
+        "what are you", "are you an ai", "r u a rag", "r u a model", 
+        "are you a rag", "are you a model", "system prompt", "using rag", 
+        "reveal your instructions", "reveal instructions"
+    ]
+    return any(kw in q for kw in probing_keywords)
+
+# ── Greeting check (LangChain Rebuild) ────────────────────────────────────────
+GREETING_RESPONSE = (
+    "Hey. Tell me what you are working on or stuck on right now. "
+    "DSA, placements, resume, internships, projects — whatever it is, let's get into it."
+)
+
+_GREETINGS_SET = {
+    "hello", "hi", "hey", "hola", "greetings", "hii", "hiii",
+    "good morning", "good evening", "yo", "sup", "heyy", "heyyy",
+}
+
+def check_greeting(text: str) -> bool:
+    q = text.lower().strip().rstrip("?.!")
+    return q in _GREETINGS_SET or (len(q.split()) == 1 and q in _GREETINGS_SET)
+

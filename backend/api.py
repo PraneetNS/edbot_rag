@@ -86,6 +86,17 @@ if tts_router is not None:
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(cleanup_stale_sessions_periodically())
+    if _EDMENTOR_READY:
+        try:
+            from edmentor.confidence_router import check_ollama_health
+            async def run_health_check():
+                ok = await check_ollama_health()
+                if not ok:
+                    logger.warning("[WARNING] Ollama is down or model is not loaded!")
+                    print("[WARNING] Ollama is down or model is not loaded!")
+            asyncio.create_task(run_health_check())
+        except Exception as e:
+            logger.warning(f"Failed to start Ollama health check task: {e}")
 
 @app.middleware("http")
 async def log_requests_middleware(request, call_next):
@@ -758,48 +769,11 @@ async def edmentor_query(req: EdmentorRequest):
             topic="general", speaking_duration="~2s", word_count=6,
         )
 
-    # 1. Intent check / domain guard
-    from edmentor.intent_router import ON_DOMAIN_KEYWORDS, is_off_domain
-    
-    is_on_domain = any(kw in q.lower() for kw in ON_DOMAIN_KEYWORDS)
-    if is_on_domain:
-        is_blocked = False
-    else:
-        is_blocked, guard_response, reason = edmentor_guard.check(q)
-        
-    if is_blocked:
-        if reason in ("identity", "character_lock"):
-            final_response = edumentor_filter(guard_response, max_words=75)
-        else:
-            final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
-            
-        return EdmentorResponse(
-            response=final_response,
-            topic="general",
-            speaking_duration=speaking_duration_label(final_response),
-            word_count=len(final_response.split()),
-        )
-
-    if not is_on_domain and is_off_domain(q):
-        final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
-        return EdmentorResponse(
-            response=final_response,
-            topic="general",
-            speaking_duration=speaking_duration_label(final_response),
-            word_count=len(final_response.split()),
-        )
-
-    # 2. Topic classify (for metadata response/UI)
+    # 1. Topic classify (for metadata response/UI)
     topic = edmentor_topic_classifier.classify(q)
 
-    # 3. LLM generation with confidence routing (local vs interim RAG)
-    response_raw, routing_mode = await generate_response_with_routing(q, req.session_id)
-
-    # 4. Safety filter & 75-word sentence boundary truncation for voice response
-    final_response = edumentor_filter(response_raw, max_words=75)
-
-    # Save turn to memory
-    edmentor_memory.save_turn(req.session_id, q, final_response)
+    # 2. Complete generation with confidence routing (includes memory storage inside the router)
+    final_response, routing_mode = await generate_response_with_routing(q, req.session_id)
 
     logger.info(
         f"[Edmentor Query] Session: {req.session_id} | "
@@ -834,40 +808,7 @@ async def edmentor_query_stream(question: str, session_id: str = "default"):
             yield "event: done\ndata: [DONE]\n\n"
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
-    # 1. Intent check / domain guard
-    from edmentor.intent_router import ON_DOMAIN_KEYWORDS, is_off_domain
-    
-    is_on_domain = any(kw in q.lower() for kw in ON_DOMAIN_KEYWORDS)
-    if is_on_domain:
-        is_blocked = False
-    else:
-        is_blocked, guard_response, reason = edmentor_guard.check(q)
-        
-    if is_blocked:
-        if reason in ("identity", "character_lock"):
-            final_response = edumentor_filter(guard_response, max_words=75)
-        else:
-            final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
-            
-        async def _guard_reject():
-            yield f"event: text\ndata: {final_response}\n\n"
-            audio_b64 = await generate_tts_async(final_response)
-            if audio_b64:
-                yield f"event: audio\ndata: {audio_b64}\n\n"
-            yield "event: done\ndata: [DONE]\n\n"
-        return StreamingResponse(_guard_reject(), media_type="text/event-stream")
-
-    if not is_on_domain and is_off_domain(q):
-        final_response = "That's outside my lane. I'm here for engineering, placements, DSA, and your career. What do you need help with there?"
-        async def _intent_reject():
-            yield f"event: text\ndata: {final_response}\n\n"
-            audio_b64 = await generate_tts_async(final_response)
-            if audio_b64:
-                yield f"event: audio\ndata: {audio_b64}\n\n"
-            yield "event: done\ndata: [DONE]\n\n"
-        return StreamingResponse(_intent_reject(), media_type="text/event-stream")
-
-    # 2. Get history and retrieve context
+    # 1. Get response from confidence routing
     response_text, routing_mode = await generate_response_with_routing(q, session_id)
 
     async def event_generator():
@@ -885,9 +826,6 @@ async def edmentor_query_stream(question: str, session_id: str = "default"):
                 audio_b64 = await generate_tts_async(s)
                 if audio_b64:
                     yield f"event: audio\ndata: {audio_b64}\n\n"
-            
-            # Save final response to history
-            edmentor_memory.save_turn(session_id, q, response_text)
             
             yield "event: done\ndata: [DONE]\n\n"
         except Exception as e:

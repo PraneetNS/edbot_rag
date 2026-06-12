@@ -1,113 +1,174 @@
-"""
-edmentor/memory.py
-──────────────────
-Conversation turn history for Edmentor.
-Wraps ai_core/memory/sqlite_memory.py to store and retrieve
-the last N (user, assistant) turn pairs per session.
-
-This enables context continuity:
-    Turn 1: "how do I solve binary trees?"
-    Turn 2: "okay now do that for graphs"
-    → Turn 2 has access to Turn 1 so the reference is resolved.
-"""
-
-import json
+import re
 import logging
-import sqlite3
-from pathlib import Path
-from typing import List, Dict
+import time
+from collections import deque
+from threading import Timer
+from typing import Dict, Any
+from langchain_classic.memory import ConversationBufferWindowMemory
 
 logger = logging.getLogger(__name__)
 
-# Store in the same chroma_db folder for consistency
-_DB_PATH = Path(__file__).resolve().parent.parent.parent / "chroma_db" / "edmentor_turns.db"
+SESSION_TTL_SECONDS = 1800  # 30 minutes
+session_last_active: dict[str, float] = {}
 
+def touch_session(session_id: str):
+    if not session_id:
+        session_id = "default"
+    session_last_active[session_id] = time.time()
+
+def get_last_responses(session_id: str) -> deque:
+    if not session_id:
+        session_id = "default"
+    if session_id not in memory.last_responses:
+        memory.last_responses[session_id] = deque(maxlen=3)
+    return memory.last_responses[session_id]
+
+def cleanup_expired_sessions():
+    try:
+        now = time.time()
+        expired = [
+            sid for sid, t in session_last_active.items()
+            if now - t > SESSION_TTL_SECONDS
+        ]
+        for sid in expired:
+            memory.sessions.pop(sid, None)
+            memory.profiles.pop(sid, None)
+            memory.last_responses.pop(sid, None)
+            session_last_active.pop(sid, None)
+            print(f"[SESSION CLEANUP] Expired: {sid}")
+    except Exception as e:
+        logger.error(f"Error in cleanup_expired_sessions: {e}")
+    # Schedule next cleanup in 10 minutes
+    t = Timer(600, cleanup_expired_sessions)
+    t.daemon = True
+    t.start()
 
 class EdmentorMemory:
     """
-    Lightweight SQLite-backed conversation turn store.
-    Each row: (session_id, turn_index, user_msg, assistant_msg, timestamp)
+    LangChain ConversationBufferWindowMemory wrapper.
+    Manages session-specific conversation memories and student profiles.
     """
+    def __init__(self):
+        self.sessions: Dict[str, ConversationBufferWindowMemory] = {}
+        self.profiles: Dict[str, Dict[str, Any]] = {}
+        self.last_responses: Dict[str, deque] = {}
 
-    def __init__(self, db_path: Path = _DB_PATH):
-        self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+    def get_or_create_session(self, session_id: str) -> ConversationBufferWindowMemory:
+        """Get or create the ConversationBufferWindowMemory for a session."""
+        if not session_id:
+            session_id = "default"
+        if session_id not in self.sessions:
+            logger.info(f"Creating new LangChain memory session for ID: {session_id}")
+            self.sessions[session_id] = ConversationBufferWindowMemory(
+                k=4,
+                return_messages=True,
+                memory_key="chat_history",
+                input_key="input",
+                output_key="output"
+            )
+        return self.sessions[session_id]
 
-    def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS edmentor_turns (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id  TEXT    NOT NULL,
-                    user_msg    TEXT    NOT NULL,
-                    assistant_msg TEXT  NOT NULL,
-                    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_session ON edmentor_turns(session_id, id)"
-            )
-            conn.commit()
+    def get_profile(self, session_id: str) -> Dict[str, Any]:
+        """Get the profile dictionary for a session (with defaults)."""
+        if not session_id:
+            session_id = "default"
+        if session_id not in self.profiles:
+            self.profiles[session_id] = {
+                "year": "Not specified",
+                "goal": "Engineering guidance",
+                "weak_areas": "None specified"
+            }
+        return self.profiles[session_id]
+
+    def update_profile(self, session_id: str, message: str) -> None:
+        """
+        Scan a user message to dynamically detect and update profile fields.
+        - Year: sophomore/junior/senior/BTech/BE/2nd/3rd/4th year
+        - Goal: placement/internship/GATE/MS/GRE/job
+        - Weak areas: struggling/weak/stuck/confused with CS topics
+        """
+        profile = self.get_profile(session_id)
+        msg_lower = message.lower()
+
+        # 1. Year detection
+        year_match = None
+        if "2nd year" in msg_lower or "second year" in msg_lower or "sophomore" in msg_lower:
+            year_match = "2nd Year BTech/BE"
+        elif "3rd year" in msg_lower or "third year" in msg_lower or "junior" in msg_lower:
+            year_match = "3rd Year BTech/BE"
+        elif "4th year" in msg_lower or "fourth year" in msg_lower or "senior" in msg_lower or "final year" in msg_lower:
+            year_match = "4th Year BTech/BE"
+        elif "btech" in msg_lower or "be degree" in msg_lower:
+            # General engineering
+            if profile["year"] == "Not specified":
+                year_match = "BTech/BE Student"
+        
+        if year_match:
+            profile["year"] = year_match
+            logger.info(f"Updated session {session_id} profile year to: {year_match}")
+
+        # 2. Goal detection
+        goal_match = None
+        if "placement" in msg_lower or "campus recruit" in msg_lower:
+            goal_match = "Placements"
+        elif "internship" in msg_lower:
+            goal_match = "Internships"
+        elif "gate" in msg_lower:
+            goal_match = "GATE Prep"
+        elif "ms" in msg_lower or "masters" in msg_lower or "gre" in msg_lower:
+            goal_match = "Higher Studies"
+        elif "job" in msg_lower or "off-campus" in msg_lower or "career" in msg_lower:
+            goal_match = "Software Engineering Career"
+
+        if goal_match:
+            profile["goal"] = goal_match
+            logger.info(f"Updated session {session_id} profile goal to: {goal_match}")
+
+        # 3. Weak areas detection
+        # Look for phrases signifying struggle combined with CS terms
+        struggle_phrases = ["struggling", "weak in", "bad at", "stuck on", "confused with", "trouble with", "don't understand", "hard time with"]
+        if any(phrase in msg_lower for phrase in struggle_phrases):
+            # Try to identify what CS/engineering topics they are talking about
+            topics = []
+            cs_keywords = [
+                "dsa", "graph", "tree", "recursion", "dynamic programming", "dp", "linked list",
+                "pointer", "sorting", "binary search", "array", "stack", "queue", "hashing",
+                "sql", "database", "system design", "operating system", "networking"
+            ]
+            for kw in cs_keywords:
+                if kw in msg_lower:
+                    topics.append(kw.upper() if kw in ("dsa", "dp", "sql") else kw)
+            if topics:
+                weak_areas = ", ".join(topics)
+                profile["weak_areas"] = weak_areas
+                logger.info(f"Updated session {session_id} profile weak areas to: {weak_areas}")
 
     def save_turn(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
-        """Append a completed turn (user + assistant) to history."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    "INSERT INTO edmentor_turns (session_id, user_msg, assistant_msg) VALUES (?, ?, ?)",
-                    (session_id, user_msg, assistant_msg),
-                )
-                conn.commit()
-        except Exception as e:
-            logger.error(f"EdmentorMemory.save_turn error: {e}")
-
-    def get_last_turns(self, session_id: str, n: int = 2) -> List[Dict[str, str]]:
-        """
-        Retrieve the last N turns for a session.
-
-        Returns:
-            List of dicts with keys 'user' and 'assistant', ordered oldest → newest.
-            Example (n=2):
-            [
-                {"user": "how do I do binary trees?", "assistant": "Before you touch trees..."},
-                {"user": "now do graphs", "assistant": "Graphs build on the same idea..."},
-            ]
-        """
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute(
-                    """
-                    SELECT user_msg, assistant_msg
-                    FROM edmentor_turns
-                    WHERE session_id = ?
-                    ORDER BY id DESC
-                    LIMIT ?
-                    """,
-                    (session_id, n),
-                )
-                rows = cursor.fetchall()
-            # Reverse so oldest turn comes first
-            rows.reverse()
-            return [{"user": r[0], "assistant": r[1]} for r in rows]
-        except Exception as e:
-            logger.error(f"EdmentorMemory.get_last_turns error: {e}")
-            return []
+        """Save a completed conversation turn to LangChain memory."""
+        # First detect any updates to the student profile from user message
+        self.update_profile(session_id, user_msg)
+        
+        # Save to memory instance
+        mem = self.get_or_create_session(session_id)
+        # ConversationBufferWindowMemory accepts inputs as dictionaries
+        mem.save_context({"input": user_msg}, {"output": assistant_msg})
+        logger.info(f"Saved turn to memory for session {session_id}.")
 
     def clear_session(self, session_id: str) -> None:
-        """Delete all turns for a session (called on /clear)."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    "DELETE FROM edmentor_turns WHERE session_id = ?",
-                    (session_id,),
-                )
-                conn.commit()
-        except Exception as e:
-            logger.error(f"EdmentorMemory.clear_session error: {e}")
-
+        """Clear the memory and profile for a session."""
+        if not session_id:
+            session_id = "default"
+        if session_id in self.sessions:
+            self.sessions[session_id].clear()
+            del self.sessions[session_id]
+        if session_id in self.profiles:
+            del self.profiles[session_id]
+        self.last_responses.pop(session_id, None)
+        session_last_active.pop(session_id, None)
+        logger.info(f"Cleared memory and profile for session {session_id}.")
 
 # Module-level singleton
 memory = EdmentorMemory()
+
+# Call cleanup_expired_sessions() once on module import to start the recurring loop
+cleanup_expired_sessions()
