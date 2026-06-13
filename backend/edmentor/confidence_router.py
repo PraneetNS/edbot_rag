@@ -73,7 +73,7 @@ def is_stuck_loop(session_id: str, response: str) -> bool:
     )
     return matches >= 2
 
-async def generate_response_with_routing(query: str, session_id: str = "default") -> tuple[str, str]:
+async def generate_response_with_routing(query: str, session_id: str = "default", pre_retrieved_docs: list = None) -> tuple[str, str]:
     """
     LangChain-based EduMentor request flow.
     Routes queries through the exact 11-step request handler call sequence.
@@ -161,7 +161,11 @@ async def generate_response_with_routing(query: str, session_id: str = "default"
     t_guard = time.time()
 
     # 6. Retrieve relevant documents from ChromaDB (LangChain retriever)
-    docs = await retrieve(cleaned)
+    if pre_retrieved_docs is not None:
+        docs = pre_retrieved_docs
+        logger.info("Using pre-retrieved docs from async overlap.")
+    else:
+        docs = await retrieve(cleaned)
 
     t_retrieval = time.time()
 
