@@ -1,6 +1,8 @@
 import re
 import logging
 import time
+import json
+import os
 from collections import deque
 from threading import Timer
 from typing import Dict, Any
@@ -10,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 SESSION_TTL_SECONDS = 1800  # 30 minutes
 session_last_active: dict[str, float] = {}
+
+PROFILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "profiles")
+os.makedirs(PROFILES_DIR, exist_ok=True)
 
 def touch_session(session_id: str):
     if not session_id:
@@ -35,6 +40,15 @@ def cleanup_expired_sessions():
             memory.profiles.pop(sid, None)
             memory.last_responses.pop(sid, None)
             session_last_active.pop(sid, None)
+            
+            # Delete profile from disk
+            profile_path = os.path.join(PROFILES_DIR, f"{sid}.json")
+            if os.path.exists(profile_path):
+                try:
+                    os.remove(profile_path)
+                except Exception as e:
+                    logger.error(f"Failed to delete profile file {profile_path}: {e}")
+            
             print(f"[SESSION CLEANUP] Expired: {sid}")
     except Exception as e:
         logger.error(f"Error in cleanup_expired_sessions: {e}")
@@ -73,12 +87,35 @@ class EdmentorMemory:
         if not session_id:
             session_id = "default"
         if session_id not in self.profiles:
-            self.profiles[session_id] = {
-                "year": "Not specified",
-                "goal": "Engineering guidance",
-                "weak_areas": "None specified"
-            }
+            profile_path = os.path.join(PROFILES_DIR, f"{session_id}.json")
+            if os.path.exists(profile_path):
+                try:
+                    with open(profile_path, "r", encoding="utf-8") as f:
+                        self.profiles[session_id] = json.load(f)
+                    logger.info(f"Loaded profile from disk for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to load profile for {session_id}: {e}")
+                    self._set_default_profile(session_id)
+            else:
+                self._set_default_profile(session_id)
         return self.profiles[session_id]
+
+    def _set_default_profile(self, session_id: str) -> None:
+        self.profiles[session_id] = {
+            "year": "Not specified",
+            "goal": "Engineering guidance",
+            "weak_areas": "None specified"
+        }
+        self._save_profile_to_disk(session_id)
+
+    def _save_profile_to_disk(self, session_id: str) -> None:
+        if session_id in self.profiles:
+            profile_path = os.path.join(PROFILES_DIR, f"{session_id}.json")
+            try:
+                with open(profile_path, "w", encoding="utf-8") as f:
+                    json.dump(self.profiles[session_id], f, indent=2)
+            except Exception as e:
+                logger.error(f"Failed to save profile for {session_id}: {e}")
 
     def update_profile(self, session_id: str, message: str) -> None:
         """
@@ -142,6 +179,10 @@ class EdmentorMemory:
                 weak_areas = ", ".join(topics)
                 profile["weak_areas"] = weak_areas
                 logger.info(f"Updated session {session_id} profile weak areas to: {weak_areas}")
+                
+        # Save to disk if updated
+        if year_match or goal_match or (any(phrase in msg_lower for phrase in struggle_phrases) and topics):
+            self._save_profile_to_disk(session_id)
 
     def save_turn(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
         """Save a completed conversation turn to LangChain memory."""
@@ -165,6 +206,15 @@ class EdmentorMemory:
             del self.profiles[session_id]
         self.last_responses.pop(session_id, None)
         session_last_active.pop(session_id, None)
+        
+        # Delete from disk
+        profile_path = os.path.join(PROFILES_DIR, f"{session_id}.json")
+        if os.path.exists(profile_path):
+            try:
+                os.remove(profile_path)
+            except Exception as e:
+                logger.error(f"Failed to delete profile file {profile_path}: {e}")
+                
         logger.info(f"Cleared memory and profile for session {session_id}.")
 
 # Module-level singleton
