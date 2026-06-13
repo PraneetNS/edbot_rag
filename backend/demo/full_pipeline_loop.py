@@ -30,7 +30,6 @@ except ImportError as e:
 # Import modular components
 from edmentor.intent_router import is_off_domain
 from edmentor.confidence_router import generate_response_with_routing
-from edmentor.rag_engine import rag_retrieve_and_respond
 from edmentor.safety_filter import edumentor_filter
 
 # Global models
@@ -88,15 +87,45 @@ async def full_pipeline(audio_array: np.ndarray) -> np.ndarray:
         print("Whisper model not initialized.")
         return None
 
-    # 1. STT
+    # 1. STT with Async Retrieval Overlap
     # Convert audio to float32 if needed and transcribe
     audio_float = audio_array.astype(np.float32)
     segments, _ = whisper_model.transcribe(audio_float, beam_size=1)
-    query = " ".join([s.text for s in segments]).strip()
+    
+    partial_words = []
+    retrieval_task = None
+    full_text = ""
+    
+    from edmentor.rag_engine import retrieve
+    from edmentor.input_guard import clean_input
+    
+    for s in segments:
+        text = s.text
+        full_text += text + " "
+        words = text.split()
+        partial_words.extend(words)
+        
+        # Start ChromaDB retrieval as soon as we have >= 3 words
+        if len(partial_words) >= 3 and retrieval_task is None:
+            partial_text = " ".join(partial_words)
+            cleaned_partial = clean_input(partial_text) or partial_text
+            print(f"  [Async] Starting retrieval early with partial text: '{cleaned_partial}'")
+            retrieval_task = asyncio.create_task(retrieve(cleaned_partial))
+            
+    query = full_text.strip()
     if not query:
         print("No audio input detected.")
         return None
     print(f"STT Transcript: '{query}'")
+
+    # Await retrieval task if it was started
+    pre_retrieved_docs = None
+    if retrieval_task is not None:
+        try:
+            pre_retrieved_docs = await retrieval_task
+            print("  [Async] Pre-retrieval complete.")
+        except Exception as e:
+            print(f"  [Async] Pre-retrieval failed: {e}")
 
     # 2. Intent check
     if is_off_domain(query):
@@ -105,7 +134,9 @@ async def full_pipeline(audio_array: np.ndarray) -> np.ndarray:
     else:
         # 3. LLM with routing (local Qwen vs direct RAG fallback)
         # Encapsulated in the confidence_router
-        response, routing_mode = await generate_response_with_routing(query)
+        response, routing_mode = await generate_response_with_routing(
+            query, pre_retrieved_docs=pre_retrieved_docs
+        )
         print(f"LLM routing mode: {routing_mode}")
 
     # 4. Safety filter
