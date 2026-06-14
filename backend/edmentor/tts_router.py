@@ -16,6 +16,7 @@ Endpoint: POST /edmentor/tts
 
 import io
 import logging
+from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
