@@ -8,7 +8,7 @@ from langchain_community.llms import Ollama
 logger = logging.getLogger(__name__)
 
 # Initialize the Ollama models
-# qwen2.5:7b is primary, gemma2:9b is fallback
+# qwen2.5:3b is primary, gemma2:9b is fallback
 ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 logger.info(f"Initializing Ollama LLMs with base URL: {ollama_base_url}")
@@ -211,6 +211,9 @@ async def generate_response_with_routing(query: str, session_id: str = "default"
         )
 
     t_llm = time.time()
+
+    word_count_out = len(response_text.split())
+    print(f"[LLM] Ollama — input_docs={len(docs)} output_words={word_count_out} llm_ms={1000*(t_llm-t_retrieval):.0f}")
 
     # 9. Sanitise output via sanitise()
     sanitised_response = sanitise(response_text)
