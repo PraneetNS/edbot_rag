@@ -31,38 +31,60 @@ class TTSRequest(BaseModel):
     speed: float = 0.95        # Slightly slower than default — mentor cadence
 
 
-def _try_kokoro(text: str, voice: str, speed: float):
-    """
-    Attempt Kokoro TTS generation.
-    Returns audio bytes on success, None on failure.
-    """
+# ── Kokoro singleton — loaded once at module import time ─────────────────────
+# Loading the ONNX model per-request adds 3-6s cold start. Pre-loading here
+# means the model is ready the moment the first /edmentor/tts request arrives.
+_kokoro_instance = None
+_kokoro_error: str | None = None
+
+def _load_kokoro():
+    global _kokoro_instance, _kokoro_error
     try:
         from kokoro_onnx import Kokoro
-        import soundfile as sf
-        import numpy as np
-        from pathlib import Path
+        import soundfile as sf  # noqa: F401 — ensure soundfile is importable
 
-        # Resolve paths dynamically relative to the backend directory
         backend_dir = Path(__file__).resolve().parent.parent
-        model_path = str(backend_dir / "kokoro-v1_0.onnx")
+        model_path  = str(backend_dir / "kokoro-v1_0.onnx")
         voices_path = str(backend_dir / "voices-v1_0.bin")
 
-        kokoro = Kokoro(model_path, voices_path)
-        samples, sample_rate = kokoro.create(text, voice=voice, speed=speed, lang="en-us")
+        logger.info("[TTS] Loading Kokoro ONNX model...")
+        _kokoro_instance = Kokoro(model_path, voices_path)
+        logger.info("[TTS] Kokoro ready.")
+    except ImportError:
+        _kokoro_error = "kokoro-onnx not installed"
+        logger.warning(f"[TTS] {_kokoro_error}")
+    except FileNotFoundError:
+        _kokoro_error = "Kokoro model files not found"
+        logger.warning(f"[TTS] {_kokoro_error}")
+    except Exception as e:
+        _kokoro_error = str(e)
+        logger.warning(f"[TTS] Kokoro load error: {e}")
+
+# Load at import time — runs once when the FastAPI app starts
+_load_kokoro()
+
+
+def _try_kokoro(text: str, voice: str, speed: float):
+    """
+    Generate TTS using the pre-loaded Kokoro singleton.
+    Returns audio bytes on success, None on failure.
+    """
+    if _kokoro_instance is None:
+        logger.error(f"[TTS] Kokoro not available — reason: {_kokoro_error}")
+        return None, None
+
+    try:
+        import soundfile as sf
+
+        samples, sample_rate = _kokoro_instance.create(text, voice=voice, speed=speed, lang="en-us")
 
         buf = io.BytesIO()
         sf.write(buf, samples, sample_rate, format="WAV")
         buf.seek(0)
         return buf.read(), "audio/wav"
 
-    except ImportError:
-        logger.info("kokoro-onnx not installed — TTS unavailable")
-        return None, None
-    except FileNotFoundError:
-        logger.info("Kokoro model files not found — TTS unavailable")
-        return None, None
     except Exception as e:
-        logger.warning(f"Kokoro TTS error: {e}")
+        logger.warning(f"[TTS] Kokoro generation error: {e}")
         return None, None
 
 
