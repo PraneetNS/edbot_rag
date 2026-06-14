@@ -44,7 +44,8 @@ def clean_input(text: str) -> str | None:
 
 # ── Pre-LLM Jailbreak Guard ───────────────────────────────────────────────────
 JAILBREAK_PATTERNS = [
-    r"ignore (your|all|previous) instructions",
+    r"ignore.{0,10}instructions",           # covers: ignore your/all/previous/all your instructions
+    r"ignore.{0,10}(prompt|system|rules)",
     r"(pretend|act|behave).{0,30}(you are|you're|ur).{0,30}(ai|gpt|claude|gemini|assistant)",
     r"you are now",
     r"developer mode",
@@ -54,6 +55,8 @@ JAILBREAK_PATTERNS = [
     r"forget (your|the|all).{0,20}(prompt|instructions|rules|system)",
     r"ignore (safety|guidelines|restrictions)",
     r"(bypass|override).{0,20}(filter|restriction|safety|rule)",
+    r"tell me your (prompt|system|instructions)",
+    r"reveal (your|the).{0,10}(prompt|instructions|system)",
 ]
 
 JAILBREAK_RESPONSE = "I am Edmentor. I am here for engineering mentorship only."

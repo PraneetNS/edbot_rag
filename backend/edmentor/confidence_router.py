@@ -44,7 +44,12 @@ def is_actually_off_domain(query: str) -> bool:
         "accenture", "amazon", "google", "tcs", "cognizant", "infosys", "wipro",
         "feel", "behind", "batch", "anxious", "scared", "stressed", "depressed", 
         "burnout", "motivated", "motivation", "pressure", "struggle", "worry", 
-        "sad", "fear", "fail", "roadmaps"
+        "sad", "fear", "fail", "roadmaps",
+        # Higher studies & career direction
+        "ms", "masters", "master", "mtech", "m.tech", "mba", "phd", "gate", "gre", "gmat",
+        "abroad", "usa", "germany", "canada", "university", "higher studies", "higher_studies",
+        "job", "work", "salary", "package", "placed", "joining", "service", "product",
+        "startup", "company", "corporate", "fresher", "experienced",
     ]
     return not any(kw in q for kw in allowed_keywords)
 
@@ -144,6 +149,13 @@ async def generate_response_with_routing(query: str, session_id: str = "default"
         logger.info("Query intercepted by check_greeting.")
         return GREETING_RESPONSE, "first_turn_greeting"
 
+    # 5. is_vague(text) -> True -> return VAGUE_RESPONSE
+    # NOTE: vague check MUST run before domain guard — a query like 'ok'
+    # has no domain keywords but is vague, not off-domain.
+    if is_vague(cleaned):
+        logger.info("Query blocked by is_vague.")
+        return VAGUE_RESPONSE, "vague_guard"
+
     # 4.5. Domain Guard Check (off-domain redirection)
     if is_actually_off_domain(rewritten):
         return "That is outside what I focus on. Ask me about DSA, placements, internships, resume, or your career.", "domain_guard"
@@ -152,11 +164,6 @@ async def generate_response_with_routing(query: str, session_id: str = "default"
     if is_blocked:
         if reason in ("blocklist", "no_keyword_match"):
             return "That is outside what I focus on. Ask me about DSA, placements, internships, resume, or your career.", "domain_guard"
-
-    # 5. is_vague(text) -> True -> return VAGUE_RESPONSE
-    if is_vague(cleaned):
-        logger.info("Query blocked by is_vague.")
-        return VAGUE_RESPONSE, "vague_guard"
 
     t_guard = time.time()
 
