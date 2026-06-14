@@ -724,13 +724,7 @@ const waveform     = document.getElementById('waveform');
 
 // ── Startup ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  // Pre-warm SpeechSynthesis voices
-  if (window.speechSynthesis) {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => {
-      window.speechSynthesis.getVoices();
-    };
-  }
+  // Kokoro TTS is used exclusively — no Web Speech API pre-warming needed.
 
   updateMuteUI();
   checkHealth();
@@ -1031,15 +1025,14 @@ async function sendMessage() {
       revealQueue.push(...words);
       startReveal(bubbleEl);
 
-      if (!isMuted) {
-        // Feed Speech Queue for background voice
-        speechQueue.push(sentence);
-        processSpeechQueue(null);
-      }
+      // No browser speech synthesis — Kokoro audio arrives via the 'audio' event below
     });
 
     eventSource.addEventListener('audio', (e) => {
-      // Bypassed: backend audio events are ignored in favor of browser-native SpeechSynthesis
+      // Kokoro base-64 WAV audio from the backend — route through HTML5 Audio queue
+      if (!isMuted && e.data) {
+        queueAudio(e.data);
+      }
     });
 
     eventSource.addEventListener('done', (e) => {
@@ -1078,8 +1071,8 @@ async function sendMessage() {
           speakText(fullText.trim(), playBtn)
         );
 
-        // If SpeechSynthesis is still speaking, link this button to active queue
-        if (isSpeakingQueue || speechQueue.length > 0) {
+        // Link button to active audio queue if Kokoro is still playing
+        if (isPlayingAudio || audioQueue.length > 0) {
           playBtn.classList.add('playing');
           currentPlayBtn = playBtn;
         }
@@ -1144,7 +1137,7 @@ function startReveal(bubbleEl) {
 async function speakText(text, btn) {
   if (isMuted) return;
 
-  // Stop any current speech and reveal timers
+  // Stop any currently playing Kokoro audio
   stopSpeaking();
 
   const bodyEl = btn.closest('.msg-body');
@@ -1161,91 +1154,55 @@ async function speakText(text, btn) {
     revealTimer = null;
   }
 
-  // Split text into words and push to revealQueue
+  // Split text into words and push to revealQueue for word-by-word reveal
   const words = text.trim().split(/\s+/).filter(Boolean);
   revealQueue.push(...words);
-
-  // Clear bubble text to start word-by-word reveal
   bubbleEl.innerText = "";
-
-  // Reset speech queue for replay speech
-  speechQueue = [];
-  isSpeakingQueue = false;
-
-  const sentences = text.split(/(?<=[.!?])\s+/);
-  for (const s of sentences) {
-    const ts = s.trim();
-    if (ts) speechQueue.push(ts);
-  }
-
-  // Start both typing reveal and voice playback in parallel
   startReveal(bubbleEl);
-  processSpeechQueue(btn);
-}
 
-function processSpeechQueue(btn) {
-  if (isSpeakingQueue) return;
-  if (speechQueue.length === 0) {
-    if (streamClosed) {
-      waveform.classList.remove('active');
-      if (btn) btn.classList.remove('playing');
-      if (currentPlayBtn) currentPlayBtn.classList.remove('playing');
+  // Re-fetch Kokoro TTS for the full response text and play it
+  btn.classList.add('playing');
+  currentPlayBtn = btn;
+  try {
+    const resp = await fetch('/edmentor/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: 'af_heart', speed: 0.95 }),
+    });
+    if (!resp.ok) {
+      console.error('[TTS] Kokoro replay request failed:', resp.status);
+      btn.classList.remove('playing');
+      return;
     }
-    return;
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('audio')) {
+      const body = await resp.json();
+      console.error('[TTS] Kokoro unavailable for replay — reason:', body.reason, '. Fix Kokoro; do NOT fall back to Web Speech API.');
+      btn.classList.remove('playing');
+      return;
+    }
+    const arrayBuf = await resp.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuf);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    const b64 = btoa(binary);
+    queueAudio(b64);
+  } catch (err) {
+    console.error('[TTS] Kokoro replay error:', err, '. No audio played.');
+    btn.classList.remove('playing');
   }
-
-  isSpeakingQueue = true;
-  waveform.classList.add('active');
-  if (btn) {
-    btn.classList.add('playing');
-    currentPlayBtn = btn;
-  }
-
-  const sentence = speechQueue.shift();
-  const utter = new SpeechSynthesisUtterance(sentence);
-  utter.rate = 0.95;
-  utter.pitch = 1.0;
-
-  // Pick best English voice
-  const voices = window.speechSynthesis.getVoices();
-  const preferred = voices.find(v => v.name.toLowerCase().includes('natural') && v.lang.startsWith('en')) ||
-                    voices.find(v => v.name.toLowerCase().includes('google us english')) ||
-                    voices.find(v => v.name.toLowerCase().includes('google')) ||
-                    voices.find(v => v.name.toLowerCase().includes('samantha')) ||
-                    voices.find(v => v.name.toLowerCase().includes('microsoft david')) ||
-                    voices.find(v => v.name.toLowerCase().includes('microsoft zira')) ||
-                    voices.find(v => v.lang.startsWith('en-US')) ||
-                    voices.find(v => v.lang.startsWith('en'));
-  if (preferred) utter.voice = preferred;
-
-  utter.onend = () => {
-    isSpeakingQueue = false;
-    currentUtterance = null;
-    processSpeechQueue(btn);
-  };
-
-  utter.onerror = (e) => {
-    console.error('Speech synthesis error:', e);
-    isSpeakingQueue = false;
-    currentUtterance = null;
-    processSpeechQueue(btn);
-  };
-
-  currentUtterance = utter;
-  window.speechSynthesis.speak(utter);
 }
 
-function _browserTTS(text, btn) {
-  speakText(text, btn);
+// Web Speech API removed — all TTS is handled by Kokoro via queueAudio().
+// processSpeechQueue is kept as a no-op to avoid reference errors in any
+// legacy call sites; it should not be called for new code paths.
+function processSpeechQueue(_btn) {
+  // no-op: Kokoro audio is queued via queueAudio() from SSE 'audio' events
 }
 
 function stopSpeaking() {
-  if (window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
+  // Kokoro only — no Web Speech API to cancel
   stopPlayingAudio();
-  speechQueue = [];
-  isSpeakingQueue = false;
 
   // Clear reveal state
   revealQueue = [];
@@ -1256,7 +1213,6 @@ function stopSpeaking() {
     revealTimer = null;
   }
 
-  currentUtterance = null;
   currentBubbleEl = null;
   if (currentPlayBtn) {
     currentPlayBtn.classList.remove('playing');
