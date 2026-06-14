@@ -749,8 +749,38 @@ def _edmentor_not_ready_response(question: str) -> EdmentorResponse:
 
 
 async def generate_tts_async(text: str) -> str:
-    # Bypassed to use client-side SpeechSynthesis (Web Speech API)
-    return ""
+    """
+    Call the Kokoro TTS endpoint and return a base-64-encoded WAV string.
+    Returns "" if Kokoro is unavailable — caller must NOT fall back to
+    Web Speech API; it should simply omit the audio event.
+    """
+    import base64
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "http://localhost:8000/edmentor/tts",
+                json={"text": text, "voice": "af_heart", "speed": 0.95},
+            )
+        if resp.status_code != 200:
+            logger.error(f"[TTS] Kokoro HTTP {resp.status_code} — no audio emitted")
+            return ""
+        content_type = resp.headers.get("content-type", "")
+        if "audio" not in content_type:
+            # JSON response means tts_unavailable
+            body = resp.json()
+            reason = body.get("reason", "unknown")
+            logger.error(f"[TTS] Kokoro unavailable — reason={reason}. Fix Kokoro; do NOT fall back to Web Speech API.")
+            return ""
+        audio_b64 = base64.b64encode(resp.content).decode("utf-8")
+        word_count = len(text.split())
+        duration_ms = int(len(resp.content) / 32)  # rough WAV estimate @ 16 kHz mono
+        print(f"[TTS] Kokoro — input_words={word_count} output_ms={duration_ms}")
+        return audio_b64
+    except Exception as exc:
+        logger.error(f"[TTS] Kokoro call failed: {exc}. No audio emitted. Fix Kokoro before re-enabling TTS.")
+        return ""
 
 
 @app.post("/edmentor/query", response_model=EdmentorResponse)
