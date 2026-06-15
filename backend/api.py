@@ -86,6 +86,15 @@ if tts_router is not None:
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(cleanup_stale_sessions_periodically())
+    
+    try:
+        print("[WARMUP] Warming up ChromaDB retriever...")
+        from edmentor.rag_engine import retrieve
+        dummy_docs = await retrieve("dsa arrays warmup")
+        print(f"[WARMUP] Done — {len(dummy_docs)} docs returned")
+    except Exception as e:
+        print(f"[WARMUP] Failed: {e}")
+
     if _EDMENTOR_READY:
         try:
             from edmentor.confidence_router import check_ollama_health
@@ -756,7 +765,9 @@ async def generate_tts_async(text: str) -> str:
     """
     import base64
     import httpx
+    import time
 
+    start_tts = time.time()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -775,8 +786,8 @@ async def generate_tts_async(text: str) -> str:
             return ""
         audio_b64 = base64.b64encode(resp.content).decode("utf-8")
         word_count = len(text.split())
-        duration_ms = int(len(resp.content) / 32)  # rough WAV estimate @ 16 kHz mono
-        print(f"[TTS] Kokoro — input_words={word_count} output_ms={duration_ms}")
+        tts_ms = int((time.time() - start_tts) * 1000)
+        print(f"[TTS] Kokoro — input_words={word_count} tts_ms={tts_ms}")
         return audio_b64
     except Exception as exc:
         logger.error(f"[TTS] Kokoro call failed: {exc}. No audio emitted. Fix Kokoro before re-enabling TTS.")
@@ -842,22 +853,28 @@ async def edmentor_query_stream(question: str, session_id: str = "default"):
     response_text, routing_mode = await generate_response_with_routing(q, session_id)
 
     async def event_generator():
+        import json
+        import time
         try:
             # Split by sentence ending punctuation:
-            sentences = re.split(r'(?<=[.!?])\s+', response_text)
+            sentences = [
+                s.strip() for s in
+                re.split(r'(?<=[.!?])\s+', response_text.strip())
+                if s.strip() and len(s.split()) >= 3
+            ]
             
             for sentence in sentences:
-                s = sentence.strip()
-                if not s:
-                    continue
+                yield f"event: text\ndata: {json.dumps(sentence)}\n\n"
                 
-                yield f"event: text\ndata: {s}\n\n"
-                
-                audio_b64 = await generate_tts_async(s)
+                tts_start = time.time()
+                audio_b64 = await generate_tts_async(sentence)
+                tts_ms = int((time.time() - tts_start) * 1000)
+                print(f"[TTS] sentence='{sentence[:30]}' ms={tts_ms}")
+
                 if audio_b64:
                     yield f"event: audio\ndata: {audio_b64}\n\n"
             
-            yield "event: done\ndata: [DONE]\n\n"
+            yield "event: done\ndata: {}\n\n"
         except Exception as e:
             logger.error(f"Error in streaming event_generator: {e}")
             yield "event: error\ndata: An error occurred during streaming.\n\n"
