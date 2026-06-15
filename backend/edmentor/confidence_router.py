@@ -21,6 +21,7 @@ llm_qwen = Ollama(
     num_predict=120,
     repeat_penalty=1.15,
     stop=["Student:", "User:", "Human:", "\n\n\n"],
+    timeout=8,   # hard 8 second ceiling — fail fast
 )
 
 llm_gemma = Ollama(
@@ -77,6 +78,22 @@ def is_stuck_loop(session_id: str, response: str) -> bool:
         if SequenceMatcher(None, norm(r), normed).ratio() > 0.85
     )
     return matches >= 2
+
+async def call_llm_with_timeout(prompt: str) -> str:
+    for attempt in range(2):  # max 2 attempts total
+        try:
+            return await llm_qwen.ainvoke(prompt)
+        except Exception as e:
+            print(f"[LLM ATTEMPT {attempt+1} FAILED] {e}")
+            if attempt == 0:
+                await asyncio.sleep(0.5)  # brief pause before retry
+                continue
+            # Both attempts failed — try gemma fallback
+            try:
+                return await llm_gemma.ainvoke(prompt)
+            except Exception as e2:
+                print(f"[LLM GEMMA FALLBACK FAILED] {e2}")
+                return "Give me a moment and try again."
 
 async def generate_response_with_routing(query: str, session_id: str = "default", pre_retrieved_docs: list = None) -> tuple[str, str]:
     """
@@ -200,22 +217,8 @@ async def generate_response_with_routing(query: str, session_id: str = "default"
         formatted_prompt += "Mentor: "
 
     # 8. Call LLM (Ollama client invocation with fallback)
-    response_text = ""
-    try:
-        try:
-            logger.info("Invoking primary Qwen-2.5:3b model...")
-            # Run standard LLM completion
-            response_text = await llm_qwen.ainvoke(formatted_prompt)
-        except Exception as e:
-            logger.warning(f"Ollama qwen2.5:3b failed: {e}. Falling back to gemma2:9b...")
-            response_text = await llm_gemma.ainvoke(formatted_prompt)
-    except Exception as e:
-        # Log the error with timestamp
-        print(f"[LLM ERROR] {datetime.now().isoformat()} — {e}")
-        response_text = (
-            "I am having a bit of trouble right now. "
-            "Give me a moment and try again."
-        )
+    logger.info("Invoking primary Qwen-2.5:3b model...")
+    response_text = await call_llm_with_timeout(formatted_prompt)
 
     t_llm = time.time()
 
