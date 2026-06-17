@@ -2,6 +2,12 @@ import sys
 import logging
 from pathlib import Path
 
+# Fix Windows cp1252 console encoding (crashes on special chars without this)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # Add backend directory to system path
 BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
@@ -64,7 +70,12 @@ def query_kb():
     print("\n" + "─"*50)
     print("                    EDUMENTOR RESPONSE")
     print("─"*50)
-    print(res)
+    if hasattr(res, 'response_gen') and res.response_gen:
+        for chunk in res.response_gen:
+            print(chunk, end="", flush=True)
+        print()
+    else:
+        print(res.response)
     print("─"*50)
     
     # Print source nodes for clarity
@@ -105,7 +116,13 @@ def chat_console():
                 break
                 
             response = query_engine.query(query)
-            print(f"\nEduMentor: {response}")
+            print(f"\nEduMentor: ", end="")
+            if hasattr(response, 'response_gen') and response.response_gen:
+                for chunk in response.response_gen:
+                    print(chunk, end="", flush=True)
+                print()
+            else:
+                print(response.response)
             
         except (KeyboardInterrupt, EOFError):
             print("\nEnding session. Keep coding and growing!")
