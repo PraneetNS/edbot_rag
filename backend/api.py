@@ -5,7 +5,9 @@ import time
 import re
 import asyncio
 import logging
-from typing import Generator
+import json
+from typing import Generator, Optional
+from datetime import datetime, timedelta
 
 # Force HuggingFace to offline mode to avoid remote check delays/timeouts
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -19,10 +21,12 @@ if hasattr(sys.stderr, 'reconfigure'):
 logger = logging.getLogger("api")
 
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 # Allow imports from backend root
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -75,16 +79,16 @@ logger = logging.getLogger("RAG_Pipeline")
 
 app = FastAPI(title="EduBot RAG API")
 
-# Mount static files
-STATIC_DIR.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-# Register Edmentor TTS router if available
-if tts_router is not None:
-    app.include_router(tts_router)
-
 @app.on_event("startup")
 async def startup_event():
+    # ── Initialise SQLite analytics DB ───────────────────────────────────────
+    try:
+        from db import init_db
+        init_db()
+        print("[DB] edumentor.db initialised.")
+    except Exception as _dbe:
+        print(f"[DB] init_db failed: {_dbe}")
+
     asyncio.create_task(cleanup_stale_sessions_periodically())
     
     try:
@@ -106,6 +110,30 @@ async def startup_event():
             asyncio.create_task(run_health_check())
         except Exception as e:
             logger.warning(f"Failed to start Ollama health check task: {e}")
+
+@app.on_event("startup")
+async def startup_warmup():
+    print("[WARMUP] Starting TTS warmup...")
+    try:
+        from edmentor.tts_router import _load_kokoro, _try_kokoro
+        _load_kokoro()
+        audio, _ = _try_kokoro("Here is the roadmap for your placement preparation.", "af_heart", 0.95)
+        if audio:
+            print("[WARMUP] TTS warmup completed successfully.")
+        else:
+            print("[WARMUP] TTS warmup failed (no audio bytes).")
+    except Exception as e:
+        print(f"[WARMUP] TTS warmup error: {e}")
+
+# Mount static files
+STATIC_DIR.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Register Edmentor TTS router if available
+if tts_router is not None:
+    app.include_router(tts_router)
+
+
 
 @app.middleware("http")
 async def log_requests_middleware(request, call_next):
@@ -393,7 +421,19 @@ def is_educational_query(query: str) -> bool:
         "frontend", "backend", "fullstack", "technology", "network", "security",
         "2nd year", "second year", "3rd year", "third year", "4th year", "fourth year",
         "final year", "sophomore", "junior", "senior", "capstone", "dsa", "oop", 
-        "system design", "resume", "interview", "mentor", "roadmaps", "placement prep"
+        "system design", "resume", "interview", "mentor", "roadmaps", "placement prep",
+        # Engineering disciplines & core concepts
+        "circuit", "transistor", "signal processing", "control system", "vlsi", "microcontroller",
+        "thermodynamics", "fluid mechanics", "heat transfer", "structural analysis", "concrete", "steel",
+        "electromagnetism", "power system", "transformer", "generator", "solid mechanics",
+        "mechanics", "kinematics", "machine design", "signal", "processing", "aerodynamics", "hydraulics",
+        "chemical", "electronics", "electrical", "civil", "mechanical", "volt", "current",
+        "resistor", "capacitor", "inductor", "diode", "op-amp", "amplifier", "digital electronics",
+        "microprocessor", "embedded systems", "cad", "fem", "fea", "structural", "surveying",
+        "soil mechanics", "thermodynamic", "entropy", "enthalpy", "refrigeration", "engine", "combustion",
+        "fluids", "pressure", "bernoulli", "signals", "fourier", "laplace", "z-transform", "dsp",
+        "feedback", "transfer function", "stability", "bode plot", "nyquist",
+        "derivation", "formula", "numerical", "problems", "solving", "concepts", "theory", "fundamentals"
     ]
     
     if any(keyword in query_lower for keyword in educational_keywords):
@@ -735,6 +775,11 @@ async def health():
 #    ⑥ Hard 80-word voice limit enforcement
 # ══════════════════════════════════════════════════════════════════════════════
 
+class ShowBlock(BaseModel):
+    type: str
+    lang: str = ""
+    content: str
+
 class EdmentorRequest(BaseModel):
     question: str
     session_id: str = "default"
@@ -744,6 +789,36 @@ class EdmentorResponse(BaseModel):
     topic: str
     speaking_duration: str
     word_count: int
+    shows: list[ShowBlock] = []
+
+def parse_dual_output(text: str) -> dict:
+    from edmentor.confidence_router import StreamingDualParser
+    parser = StreamingDualParser()
+    events = parser.feed(text)
+    events += parser.finalize()
+    
+    speak_parts = []
+    shows = []
+    for ev in events:
+        if ev["type"] == "text":
+            speak_parts.append(ev["content"])
+        elif ev["type"] == "show":
+            shows.append({
+                "type": ev["show_type"],
+                "lang": ev["lang"],
+                "content": ev["content"]
+            })
+    
+    speak_text = " ".join(speak_parts).strip()
+    
+    if "<speak>" not in text and "<show" not in text:
+        from edmentor.output_sanitiser import sanitise
+        speak_text = sanitise(speak_text)
+        
+    return {
+        "speak": speak_text,
+        "shows": shows
+    }
 
 
 def _edmentor_not_ready_response(question: str) -> EdmentorResponse:
@@ -794,8 +869,329 @@ async def generate_tts_async(text: str) -> str:
         return ""
 
 
+async def generate_tts_stream_async(text: str):
+    """
+    Directly streams Kokoro TTS audio chunks as base-64 encoded WAV strings.
+    """
+    import base64
+    import time
+    import io
+    import asyncio
+    try:
+        from edmentor.tts_router import _kokoro_instance
+        if _kokoro_instance is None:
+            return
+            
+        import soundfile as sf
+        
+        start_tts = time.time()
+        samples, sample_rate = _kokoro_instance.create(text, voice="af_heart", speed=0.95, lang="en-us")
+        
+        buf = io.BytesIO()
+        sf.write(buf, samples, sample_rate, format="WAV")
+        buf.seek(0)
+        audio_b64 = base64.b64encode(buf.read()).decode("utf-8")
+        yield audio_b64
+            
+        tts_ms = int((time.time() - start_tts) * 1000)
+        print(f"[TTS Stream] completed in {tts_ms}ms")
+    except Exception as exc:
+        logger.error(f"[TTS Stream] Kokoro stream failed: {exc}")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  AUTH LAYER  (Part 3)
+#  Simple JWT auth — no OAuth, no external service.
+#  Libraries: python-jose[cryptography], passlib[bcrypt]
+# ════════════════════════════════════════════════════════════════════════════════
+from dotenv import load_dotenv
+load_dotenv()
+
+try:
+    from jose import JWTError, jwt
+    import bcrypt as _bcrypt_lib
+    _AUTH_READY = True
+except ImportError:
+    _AUTH_READY = False
+    logger.warning("[AUTH] python-jose or bcrypt not installed. Auth routes will return 503.")
+
+_SECRET_KEY    = os.getenv("SECRET_KEY", "change-me-in-production-please")
+_JWT_ALGORITHM = "HS256"
+_JWT_EXPIRE_H  = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
+
+_http_bearer = HTTPBearer(auto_error=False)
+
+
+def _hash_password(plain: str) -> str:
+    """Hash a plaintext password with bcrypt."""
+    salt = _bcrypt_lib.gensalt()
+    return _bcrypt_lib.hashpw(plain.encode("utf-8"), salt).decode("utf-8")
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    """Verify a plaintext password against a bcrypt hash."""
+    try:
+        return _bcrypt_lib.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def _create_token(data: dict) -> str:
+    payload = data.copy()
+    payload["exp"] = datetime.utcnow() + timedelta(hours=_JWT_EXPIRE_H)
+    return jwt.encode(payload, _SECRET_KEY, algorithm=_JWT_ALGORITHM)
+
+
+async def get_current_student(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_http_bearer),
+    x_student_id: Optional[str] = Header(default=None, alias="X-Student-ID"),
+) -> dict:
+    """
+    FastAPI dependency.
+    Tries Bearer token first; falls back to X-Student-ID header (anonymous mode
+    for backwards-compatible testing).
+    Raises 401 if token is present but invalid.
+    """
+    # ─ No credentials at all — check X-Student-ID fallback ──────────────────
+    if credentials is None:
+        if x_student_id:
+            return {"student_id": x_student_id, "username": x_student_id, "year": None}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not _AUTH_READY:
+        raise HTTPException(status_code=503, detail="Auth module not installed")
+
+    try:
+        payload = jwt.decode(credentials.credentials, _SECRET_KEY, algorithms=[_JWT_ALGORITHM])
+        student_id: str = payload.get("student_id")
+        username: str   = payload.get("username")
+        if not student_id:
+            raise ValueError("missing student_id")
+        return {"student_id": student_id, "username": username, "year": payload.get("year")}
+    except (JWTError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+
+async def get_current_student_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_http_bearer),
+    x_student_id: Optional[str] = Header(default=None, alias="X-Student-ID"),
+) -> dict:
+    """
+    Like get_current_student but never raises 401 — returns anonymous instead.
+    Used on /edmentor/* so existing tests without a token continue to work.
+    """
+    try:
+        return await get_current_student(credentials, x_student_id)
+    except HTTPException:
+        return {"student_id": "anonymous", "username": "anonymous", "year": None}
+
+
+# ── Auth Pydantic models ──────────────────────────────────────────────────────────────
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    year:     Optional[str] = None
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+# ── Auth routes ───────────────────────────────────────────────────────────────────
+@app.post("/auth/register", status_code=201)
+async def auth_register(req: RegisterRequest):
+    """Create a new student account."""
+    if not _AUTH_READY:
+        raise HTTPException(status_code=503, detail="Auth module not installed")
+    from db import create_student, get_student_by_username
+    import sqlite3
+    if get_student_by_username(req.username):
+        raise HTTPException(status_code=400, detail="Username already taken")
+    try:
+        student = create_student(
+            username=req.username,
+            password_hash=_hash_password(req.password),
+            year=req.year,
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="Username already taken")
+    return {"student_id": student["student_id"], "username": student["username"]}
+
+
+@app.post("/auth/login")
+async def auth_login(req: LoginRequest):
+    """Verify password and return a JWT access token."""
+    if not _AUTH_READY:
+        raise HTTPException(status_code=503, detail="Auth module not installed")
+    from db import get_student_by_username
+    student = get_student_by_username(req.username)
+    if not student or not _verify_password(req.password, student["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
+    token = _create_token({
+        "student_id": student["student_id"],
+        "username":   student["username"],
+        "year":       student.get("year"),
+    })
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@app.get("/auth/me")
+async def auth_me(student: dict = Depends(get_current_student)):
+    """Return the currently authenticated student."""
+    return {
+        "student_id": student["student_id"],
+        "username":   student["username"],
+        "year":       student.get("year"),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  ANALYTICS DASHBOARD ROUTES  (Part 4)
+#  All routes require get_current_student.
+#  Students can only query their own data.
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _enforce_own_data(student_id_path: str, student: dict):
+    """Raise 403 if the token owner doesn't match the requested student_id."""
+    if student["student_id"] != student_id_path:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own data.",
+        )
+
+
+@app.get("/dashboard/{student_id}/stats")
+async def dashboard_stats(
+    student_id: str,
+    student: dict = Depends(get_current_student),
+):
+    """Aggregated learning stats for the dashboard."""
+    _enforce_own_data(student_id, student)
+    from db import get_student_stats
+    return get_student_stats(student_id)
+
+
+@app.get("/dashboard/{student_id}/timeline")
+async def dashboard_timeline(
+    student_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    student: dict = Depends(get_current_student),
+):
+    """Recent Q&A history ordered by timestamp DESC."""
+    _enforce_own_data(student_id, student)
+    from db import get_student_turns
+    return get_student_turns(student_id, limit=limit, offset=offset)
+
+
+@app.get("/dashboard/{student_id}/gaps")
+async def dashboard_gaps(
+    student_id: str,
+    student: dict = Depends(get_current_student),
+):
+    """Topics where the student repeats questions or has RAG knowledge gaps."""
+    _enforce_own_data(student_id, student)
+    from db import get_weak_areas
+    return get_weak_areas(student_id)
+
+
+@app.get("/dashboard/{student_id}/insights")
+async def dashboard_insights(
+    student_id: str,
+    student: dict = Depends(get_current_student),
+):
+    """Plain-text mentor insights computed from analytics — no LLM call."""
+    _enforce_own_data(student_id, student)
+    from db import get_student_stats, get_weak_areas
+    import sqlite3
+    from datetime import date
+
+    stats = get_student_stats(student_id)
+    weak  = get_weak_areas(student_id)
+
+    topic_breakdown: dict = stats.get("topic_breakdown", {})
+    total_turns = stats.get("total_turns", 0)
+
+    # ─ Focus recommendation ───────────────────────────────────────────────────────
+    focus_recommendation = "Keep exploring different topics to build a well-rounded profile."
+    if topic_breakdown:
+        sorted_topics = sorted(topic_breakdown.items(), key=lambda x: x[1], reverse=True)
+        top_topic, top_count = sorted_topics[0]
+        if len(sorted_topics) > 1:
+            bottom_topic, bottom_count = sorted_topics[-1]
+            if top_count >= 3 * max(bottom_count, 1):
+                focus_recommendation = (
+                    f"You've asked {top_count} questions on {top_topic} but only "
+                    f"{bottom_count} on {bottom_topic} — consider broadening before placement season."
+                )
+
+    # ─ Consistency signal (active days in last 7) ────────────────────────────
+    active_days = stats.get("active_days", 0)
+    consistency_signal = "Not enough data yet to assess consistency."
+    if active_days >= 5:
+        consistency_signal = f"You've been active {active_days} of the last 7 days — good momentum."
+    elif active_days >= 3:
+        consistency_signal = f"You've been active {active_days} days recently — aim for daily practice."
+    elif active_days > 0:
+        consistency_signal = f"You've only been active {active_days} day(s) recently — try to study a little each day."
+
+    # ─ Strongest / weakest topic ──────────────────────────────────────────────
+    strongest_topic = "None yet"
+    weakest_topic   = "None yet"
+    if topic_breakdown:
+        strongest_topic = max(topic_breakdown, key=topic_breakdown.get)
+        weakest_topic   = min(topic_breakdown, key=topic_breakdown.get)
+        wt_count = topic_breakdown[weakest_topic]
+        weakest_topic = (
+            f"{weakest_topic.replace('_',' ').title()} — only {wt_count} question(s) ever. "
+            "If this is relevant to your goals, ask more."
+        )
+
+    # ─ Session pattern ──────────────────────────────────────────────────────────
+    avg_len = stats.get("avg_session_length_turns", 0)
+    session_pattern = "Start more sessions to build a study pattern."
+    if avg_len >= 5:
+        session_pattern = f"Your sessions average {avg_len:.1f} questions — you go deep when you sit down. Great habit."
+    elif avg_len >= 2:
+        session_pattern = f"Your sessions average {avg_len:.1f} questions. Try to push deeper in each session."
+    elif avg_len > 0:
+        session_pattern = f"Your sessions are short ({avg_len:.1f} questions on average). Try to ask follow-up questions."
+
+    return {
+        "focus_recommendation": focus_recommendation,
+        "consistency_signal":   consistency_signal,
+        "strongest_topic":      strongest_topic,
+        "weakest_topic":        weakest_topic,
+        "session_pattern":      session_pattern,
+    }
+
+
+# ── Static pages for login / dashboard ──────────────────────────────────────────────────────────
+@app.get("/login.html")
+async def serve_login():
+    return FileResponse(str(STATIC_DIR / "login.html"))
+
+@app.get("/dashboard.html")
+async def serve_dashboard():
+    return FileResponse(str(STATIC_DIR / "dashboard.html"))
+
+
 @app.post("/edmentor/query", response_model=EdmentorResponse)
-async def edmentor_query(req: EdmentorRequest):
+async def edmentor_query(
+    req: EdmentorRequest,
+    student: dict = Depends(get_current_student_optional),
+):
     """
     Edmentor voice mentor query endpoint.
     Uses confidence-based routing and safety filtering.
@@ -814,24 +1210,38 @@ async def edmentor_query(req: EdmentorRequest):
     topic = edmentor_topic_classifier.classify(q)
 
     # 2. Complete generation with confidence routing (includes memory storage inside the router)
-    final_response, routing_mode = await generate_response_with_routing(q, req.session_id)
+    raw_response, routing_mode = await generate_response_with_routing(
+        q, req.session_id, student_id=student["student_id"]
+    )
+
+    parsed = parse_dual_output(raw_response)
+    speak_text = parsed["speak"]
+    shows = parsed["shows"]
+    if routing_mode == "technical-concept":
+        shows = []
 
     logger.info(
         f"[Edmentor Query] Session: {req.session_id} | "
         f"Topic: {topic} | Routing: {routing_mode} | "
-        f"Words: {len(final_response.split())}"
+        f"Words: {len(speak_text.split())}"
     )
 
     return EdmentorResponse(
-        response=final_response,
+        response=speak_text,
         topic=topic,
-        speaking_duration=speaking_duration_label(final_response),
-        word_count=len(final_response.split()),
+        speaking_duration=speaking_duration_label(speak_text),
+        word_count=len(speak_text.split()),
+        shows=shows,
     )
 
 
 @app.get("/edmentor/query/stream")
-async def edmentor_query_stream(question: str, session_id: str = "default"):
+async def edmentor_query_stream(
+    question: str,
+    session_id: str = "default",
+    engine: str = "rag_qwen",
+    student: dict = Depends(get_current_student_optional),
+):
     """
     Streaming variant of /edmentor/query using confidence-based routing.
     Streams final safety-filtered text and audio interleaved as SSE events.
@@ -849,37 +1259,58 @@ async def edmentor_query_stream(question: str, session_id: str = "default"):
             yield "event: done\ndata: [DONE]\n\n"
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
-    # 1. Get response from confidence routing
-    response_text, routing_mode = await generate_response_with_routing(q, session_id)
+    # 1. Get response based on engine choice
+    if engine == "rag":
+        if query_engine is not None:
+            response_obj = query_engine.query(q)
+            response_text = str(response_obj)
+            if _EDMENTOR_READY:
+                from edmentor.safety_filter import edumentor_filter
+                response_text = edumentor_filter(response_text)
+        else:
+            response_text = "Primary RAG engine is currently unavailable."
 
-    async def event_generator():
-        import json
-        import time
-        try:
-            # Split by sentence ending punctuation:
-            sentences = [
-                s.strip() for s in
-                re.split(r'(?<=[.!?])\s+', response_text.strip())
-                if s.strip() and len(s.split()) >= 3
-            ]
-            
+        async def static_event_generator():
+            from edmentor.confidence_router import split_into_sentences
+            raw_sentences = split_into_sentences(response_text.strip())
+            sentences = [s for s in raw_sentences if len(s.split()) >= 3]
             for sentence in sentences:
-                yield f"event: text\ndata: {json.dumps(sentence)}\n\n"
-                
-                tts_start = time.time()
-                audio_b64 = await generate_tts_async(sentence)
-                tts_ms = int((time.time() - tts_start) * 1000)
-                print(f"[TTS] sentence='{sentence[:30]}' ms={tts_ms}")
-
-                if audio_b64:
+                safe_sentence = sentence.replace('\n', ' ')
+                yield f"event: text\ndata: {safe_sentence}\n\n"
+                async for audio_b64 in generate_tts_stream_async(sentence):
                     yield f"event: audio\ndata: {audio_b64}\n\n"
-            
             yield "event: done\ndata: {}\n\n"
-        except Exception as e:
-            logger.error(f"Error in streaming event_generator: {e}")
-            yield "event: error\ndata: An error occurred during streaming.\n\n"
+        return StreamingResponse(static_event_generator(), media_type="text/event-stream")
+    else:
+        # True real-time streaming using confidence routing & LLM streaming generator
+        from edmentor.confidence_router import generate_stream_with_routing
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+        async def streaming_event_generator():
+            try:
+                async for event in generate_stream_with_routing(
+                    q, session_id, student_id=student["student_id"]
+                ):
+                    if event["type"] == "text":
+                        sentence = event["content"]
+                        safe_sentence = sentence.replace('\n', ' ')
+                        # Yield the sentence text to trigger typing immediately
+                        yield f"event: text\ndata: {safe_sentence}\n\n"
+                        # Generate and yield the audio chunk for the sentence
+                        async for audio_b64 in generate_tts_stream_async(sentence):
+                            yield f"event: audio\ndata: {audio_b64}\n\n"
+                    elif event["type"] == "show":
+                        show_data = {
+                            "type": event["show_type"],
+                            "lang": event["lang"],
+                            "content": event["content"]
+                        }
+                        yield f"event: show\ndata: {json.dumps(show_data)}\n\n"
+                yield "event: done\ndata: {}\n\n"
+            except Exception as e:
+                logger.error(f"Error in streaming event_generator: {e}")
+                yield "event: error\ndata: An error occurred during streaming.\n\n"
+
+        return StreamingResponse(streaming_event_generator(), media_type="text/event-stream")
 
 
 @app.delete("/edmentor/session/{session_id}")
