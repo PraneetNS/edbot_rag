@@ -16,3 +16,6 @@ llama-index-postprocessor-flag-embedding-reranker
 # Edmentor additions
 python-dotenv
 httpx          # async HTTP client — used by generate_tts_async to call /edmentor/tts (Kokoro)
+# Auth additions
+python-jose[cryptography]
+passlib[bcrypt]
