@@ -5,7 +5,7 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "mistral"
+OLLAMA_MODEL = "qwen2.5:3b"
 
 class QwenClient:
     """
@@ -37,7 +37,9 @@ class QwenClient:
             def sync_post():
                 r = requests.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=60)
                 if r.status_code == 200:
-                    return r.json().get("response", "").strip()
+                    text = r.json().get("response", "").strip()
+                    text = text.replace('"', '').replace('“', '').replace('”', '')
+                    return text
                 return "Error connecting to LLM server."
 
             return await loop.run_in_executor(None, sync_post)
