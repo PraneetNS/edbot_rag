@@ -3,9 +3,14 @@ import logging
 import time
 import json
 import os
+import warnings
 from collections import deque
 from threading import Timer
 from typing import Dict, Any
+
+# Suppress the LangChain deprecation warning for ConversationBufferWindowMemory
+warnings.filterwarnings("ignore", message=".*ConversationBufferWindowMemory.*")
+
 from langchain_classic.memory import ConversationBufferWindowMemory
 
 logger = logging.getLogger(__name__)
