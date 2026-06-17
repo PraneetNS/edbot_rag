@@ -105,6 +105,18 @@ _IN_SCOPE_KEYWORDS = [
     "why", "when", "can you", "explain", "tell me", "guide", "roadmap", "plan",
     "prepare", "practice", "competitive programming", "leetcode", "codeforces",
     "hackerrank", "cp",
+    # Engineering disciplines & core concepts
+    "circuit", "transistor", "signal processing", "control system", "vlsi", "microcontroller",
+    "thermodynamics", "fluid mechanics", "heat transfer", "structural analysis", "concrete", "steel",
+    "electromagnetism", "power system", "transformer", "generator", "solid mechanics",
+    "mechanics", "kinematics", "machine design", "signal", "processing", "aerodynamics", "hydraulics",
+    "chemical", "electronics", "electrical", "civil", "mechanical", "volt", "current",
+    "resistor", "capacitor", "inductor", "diode", "op-amp", "amplifier", "digital electronics",
+    "microprocessor", "embedded systems", "cad", "fem", "fea", "structural", "surveying",
+    "soil mechanics", "thermodynamic", "entropy", "enthalpy", "refrigeration", "engine", "combustion",
+    "fluids", "pressure", "bernoulli", "signals", "fourier", "laplace", "z-transform", "dsp",
+    "feedback", "transfer function", "stability", "bode plot", "nyquist",
+    "derivation", "formula", "numerical", "problems", "solving", "concepts", "theory", "fundamentals"
 ]
 
 
