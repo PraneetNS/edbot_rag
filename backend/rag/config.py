@@ -28,5 +28,5 @@ RERANK_TOP_N = 3
 RERANK_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # LLM (Ollama configuration)
-OLLAMA_MODEL = "mistral"
+OLLAMA_MODEL = "qwen2.5:3b"
 OLLAMA_BASE_URL = "http://localhost:11434"
