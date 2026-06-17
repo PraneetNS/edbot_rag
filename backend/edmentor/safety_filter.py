@@ -12,7 +12,7 @@ Executed in order:
 
 import re
 
-MAX_WORDS = 60
+MAX_WORDS = 200
 
 
 # ── Step 3 helper ─────────────────────────────────────────────────────────────
@@ -83,6 +83,7 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     text = re.sub(r'\[Source:.*?\]', '', text, flags=re.IGNORECASE)
 
     # Remove AI filler phrases (retained from original functionality for test compatibility)
+    # Remove fillers
     fillers = [
         "great question", "certainly", "sure!", "absolutely", 
         "of course", "i'd be happy to", "as an ai", "sure"
@@ -90,6 +91,9 @@ def edumentor_filter(text: str, max_words: int = MAX_WORDS) -> str:
     for f in fillers:
         pattern = r'\b' + re.escape(f) + r'\b[,.!?]?'
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+
+    # Remove double inverted commas
+    text = text.replace('"', '').replace('“', '').replace('”', '')
 
     # Normalize whitespace
     text = re.sub(r'\s+', ' ', text).strip()
