@@ -21,7 +21,19 @@ ON_DOMAIN_KEYWORDS = [
     "internship", "resume", "project", "leetcode", "interview", "backlog", "cgpa", 
     "semester", "college", "offer", "career", "algorithm", "complexity", "os", 
     "dbms", "cn", "networking", "oops", "java", "python", "c plus plus", 
-    "system design", "bit manipulation", "string", "binary", "matrix"
+    "system design", "bit manipulation", "string", "binary", "matrix",
+    # Engineering concepts & disciplines
+    "circuit", "transistor", "signal processing", "control system", "vlsi", "microcontroller",
+    "thermodynamics", "fluid mechanics", "heat transfer", "structural analysis", "concrete", "steel",
+    "electromagnetism", "power system", "transformer", "generator", "solid mechanics",
+    "mechanics", "kinematics", "machine design", "signal", "processing", "aerodynamics", "hydraulics",
+    "chemical", "electronics", "electrical", "civil", "mechanical", "volt", "current",
+    "resistor", "capacitor", "inductor", "diode", "op-amp", "amplifier", "digital electronics",
+    "microprocessor", "embedded systems", "cad", "fem", "fea", "structural", "surveying",
+    "soil mechanics", "thermodynamic", "entropy", "enthalpy", "refrigeration", "engine", "combustion",
+    "fluids", "pressure", "bernoulli", "signals", "fourier", "laplace", "z-transform", "dsp",
+    "feedback", "transfer function", "stability", "bode plot", "nyquist",
+    "derivation", "formula", "numerical", "problems", "solving", "concepts", "theory", "fundamentals"
 ]
 
 def is_off_domain(query: str) -> bool:
