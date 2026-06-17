@@ -38,6 +38,11 @@ async def measure_tts(text: str) -> float:
         # Singleton: load once per process
         if not hasattr(measure_tts, "_kokoro"):
             measure_tts._kokoro = Kokoro(model_path, voices_path)
+            # Warm up with a realistic sentence length
+            measure_tts._kokoro.create(
+                "Here is the roadmap for your placement preparation.",
+                voice="af_heart", speed=0.95, lang="en-us"
+            )
 
         t0 = time.perf_counter()
         samples, sample_rate = measure_tts._kokoro.create(
