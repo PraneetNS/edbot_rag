@@ -142,6 +142,15 @@ class QueryResponse:
     def __str__(self):
         return self.response
 
+class StreamingQueryResponse:
+    def __init__(self, response_gen, source_nodes: List[NodeWithScore]):
+        self.response_gen = response_gen
+        self.source_nodes = source_nodes
+        self.response = "<Streaming response>"
+        
+    def __str__(self):
+        return self.response
+
 class FallbackEduMentorQueryEngine:
     """
     Offline fallback query engine that activates if Ollama is not running.
@@ -164,7 +173,7 @@ class FallbackEduMentorQueryEngine:
             import requests
             payload = {
                 "model": OLLAMA_MODEL,
-                "prompt": f"Answer the student's question using your own knowledge as a senior engineering mentor. Do not use markdown, bullet points, or list formatting. Keep the response natural, spoken, and under 75 words.\n\nStudent Question: {query_str}",
+                "prompt": f"Answer the student's question using your own knowledge as a senior engineering mentor. Do not use markdown, bullet points, or list formatting. Keep the response natural, spoken, and under 200 words.\n\nStudent Question: {query_str}",
                 "system": "You are Edmentor, a senior engineering mentor. You answer student questions in plain natural spoken sentences only. Never use markdown, bold, lists, or formatting.",
                 "stream": False,
                 "options": {
@@ -258,7 +267,7 @@ occasionally blunt, always warm. You have lived through placements, internships,
 DSA grind, burnout — all of it.
 
 STRICT VOICE RULES:
-- Reply in 2-3 sentences maximum. Never more.
+- Reply in 5-8 sentences. Give comprehensive guidance.
 - No bullet points. No numbered lists. No markdown. No headers.
 - Write exactly how you would speak out loud.
 - Use casual English — contractions, "yeah", "look", "honestly" are fine.
@@ -297,8 +306,8 @@ class EduMentorRAGQueryEngine:
         self.is_5k = is_5k
 
     def query(self, query_str: str) -> QueryResponse:
-        # Fetch single best matching chunk (RAG-only mode)
-        retriever = self.index.as_retriever(similarity_top_k=1)
+        # Fetch best matching chunks
+        retriever = self.index.as_retriever(similarity_top_k=4)
         nodes = retriever.retrieve(query_str)
 
         # Filter by threshold 0.42
@@ -310,78 +319,49 @@ class EduMentorRAGQueryEngine:
                 nws.score = similarity
                 filtered.append(nws)
 
-        # ── RAG-only mode: return top-1 chunk as concise mentor advice ──────
+        # ── Ollama LLM synthesis ─────────
+        top_section: str | None = filtered[0].node.metadata.get("section") if filtered else None
+        system = _BASE_SYSTEM
+        if top_section and top_section in _SECTION_TONE_HINTS:
+            system += "\n\n" + _SECTION_TONE_HINTS[top_section]
         if filtered:
-            raw = filtered[0].node.text
-            top_section = filtered[0].node.metadata.get("section")
+            merged_context = "\n\n".join(_merge_by_id(filtered))
+            user_prompt = (
+                f"Knowledge context (use this to inform your answer, do not quote it directly):\n{merged_context}\n\n"
+                f"Student says: \"{query_str}\"\n\nReply as EduMentor in 2-3 spoken sentences."
+            )
+        else:
+            user_prompt = (
+                f"Student says: \"{query_str}\"\n\n"
+                "You don't have specific reference material. Answer from your experience as a senior engineer."
+            )
+        if check_ollama_active():
+            import requests
+            import json
             try:
-                from edmentor.rag_engine import (
-                    _extract_mentor_lines,
-                    _SECTION_INTROS,
-                    _SECTION_OUTROS,
-                    _GENERAL_INTROS,
-                    _GENERAL_OUTROS,
-                )
-                import random
-                mentor_text = _extract_mentor_lines(raw)
+                r = requests.post(f"{OLLAMA_BASE_URL}/api/generate",
+                    json={"model": OLLAMA_MODEL, "prompt": user_prompt,
+                          "system": system, "stream": True, "options": {"temperature": 0.3}},
+                    timeout=60, stream=True)
                 
-                intros = _SECTION_INTROS.get(top_section, _GENERAL_INTROS) if top_section else _GENERAL_INTROS
-                outros = _SECTION_OUTROS.get(top_section, _GENERAL_OUTROS) if top_section else _GENERAL_OUTROS
-                
-                intro = random.choice(intros)
-                outro = random.choice(outros)
-                
-                if not any(greet in mentor_text.lower()[:15] for greet in ["hey", "hello", "hi", "look", "listen", "alright"]):
-                    mentor_text = f"{intro}{mentor_text}{outro}"
-                else:
-                    mentor_text = f"{mentor_text}{outro}"
+                if r.status_code == 200:
+                    def generate_chunks():
+                        for line in r.iter_lines():
+                            if line:
+                                data = json.loads(line)
+                                if "response" in data:
+                                    # Basic inline filtering for markdown
+                                    chunk = data["response"]
+                                    chunk = chunk.replace("*", "").replace("#", "").replace("`", "")
+                                    yield chunk
+                                    
+                    return StreamingQueryResponse(generate_chunks(), filtered)
             except Exception as e:
-                # Fallback to simple trim if import or extraction fails
-                words = raw.split()
-                mentor_text = " ".join(words[:100])
-                if len(words) > 100 and "." in mentor_text:
-                    mentor_text = mentor_text[:mentor_text.rfind(".")+1]
-            return QueryResponse(mentor_text.strip(), filtered[:1])
-
-        # No chunks retrieved above threshold
-        return QueryResponse(
-            "Hmm, I don't have anything in my notes on that. "
-            "Ask me about DSA, placements, internships, resume, or your career — that's where I can actually help.",
-            []
-        )
-
-        # ── Ollama LLM synthesis (disabled — uncomment to re-enable) ─────────
-        # top_section: str | None = filtered[0].node.metadata.get("section") if filtered else None
-        # system = _BASE_SYSTEM
-        # if top_section and top_section in _SECTION_TONE_HINTS:
-        #     system += "\n\n" + _SECTION_TONE_HINTS[top_section]
-        # if filtered:
-        #     merged_context = "\n\n".join(_merge_by_id(filtered))
-        #     user_prompt = (
-        #         f"Knowledge context (use this to inform your answer, do not quote it directly):\n{merged_context}\n\n"
-        #         f"Student says: \"{query_str}\"\n\nReply as EduMentor in 2-3 spoken sentences."
-        #     )
-        # else:
-        #     user_prompt = (
-        #         f"Student says: \"{query_str}\"\n\n"
-        #         "You don't have specific reference material. Answer from your experience as a senior engineer."
-        #     )
-        # response_text = ""
-        # if check_ollama_active():
-        #     import requests
-        #     try:
-        #         r = requests.post(f"{OLLAMA_BASE_URL}/api/generate",
-        #             json={"model": OLLAMA_MODEL, "prompt": user_prompt,
-        #                   "system": system, "stream": False, "options": {"temperature": 0.3}},
-        #             timeout=60)
-        #         if r.status_code == 200:
-        #             response_text = r.json().get("response", "").strip()
-        #     except Exception as e:
-        #         logger.error(f"Error calling Ollama: {e}")
-        # if not response_text:
-        #     response_text = "Looks like my LLM brain is offline — make sure Ollama is running and try again."
-        # from edmentor.safety_filter import edumentor_filter
-        # return QueryResponse(edumentor_filter(response_text), filtered)
+                logger.error(f"Error calling Ollama: {e}")
+                
+        response_text = "Looks like my LLM brain is offline — make sure Ollama is running and try again."
+        from edmentor.safety_filter import edumentor_filter
+        return QueryResponse(edumentor_filter(response_text), filtered)
 
 def get_edumentor_query_engine(index: VectorStoreIndex):
     """Returns the custom EduMentor Query Engine."""
