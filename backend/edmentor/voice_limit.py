@@ -50,7 +50,7 @@ def strip_markdown(text: str) -> str:
     return text.strip()
 
 
-def enforce_voice_limit(text: str, max_words: int = 60) -> str:
+def enforce_voice_limit(text: str, max_words: int = 200) -> str:
     """
     Hard post-processing word-limit enforcement for voice output.
     Routes to safety_filter's edumentor_filter to maintain consistent cleaning.
