@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduMentor — Login</title>
+  <meta name="description" content="Login to EduMentor to access your personalised learning dashboard and track your study progress." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f1a;
+      --surface:   #161929;
+      --border:    #252840;
+      --accent:    #7c6ff7;
+      --accent2:   #5ef6ff;
+      --text:      #e8eaf6;
+      --muted:     #8b90b8;
+      --danger:    #ff6b6b;
+      --radius:    16px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(124,111,247,.25) 0%, transparent 70%),
+        var(--bg);
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 32px 80px rgba(0,0,0,.5);
+      animation: fadeUp .45s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(20px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 32px;
+    }
+
+    .logo-icon {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+    }
+
+    .logo-text {
+      font-size: 22px;
+      font-weight: 700;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    input {
+      width: 100%;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 15px;
+      color: var(--text);
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+      margin-bottom: 18px;
+      font-family: inherit;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(124,111,247,.2);
+    }
+
+    input::placeholder { color: var(--muted); }
+
+    .btn {
+      width: 100%;
+      padding: 13px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #5b8af7);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .15s, box-shadow .2s;
+      font-family: inherit;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(124,111,247,.4); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+
+    .btn-spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      margin-top: 14px;
+      padding: 10px 14px;
+      background: rgba(255,107,107,.1);
+      border: 1px solid rgba(255,107,107,.3);
+      border-radius: 8px;
+      color: var(--danger);
+      font-size: 13px;
+      display: none;
+      animation: fadeUp .2s ease;
+    }
+
+    .error-msg.show { display: block; }
+
+    .register-link {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .register-link a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .register-link a:hover { text-decoration: underline; }
+
+    /* Register form (hidden by default) */
+    #register-section {
+      display: none;
+    }
+
+    #register-section.show { display: block; }
+
+    .toggle-row {
+      display: flex; gap: 8px; margin-bottom: 28px;
+    }
+
+    .tab-btn {
+      flex: 1; padding: 9px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all .2s;
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="logo-icon">🎓</div>
+      <span class="logo-text">EduMentor</span>
+    </div>
+
+    <h1 id="form-title">Welcome back</h1>
+    <p class="subtitle" id="form-subtitle">Login to see your learning dashboard.</p>
+
+    <div class="toggle-row">
+      <button class="tab-btn active" id="tab-login" onclick="showTab('login')">Login</button>
+      <button class="tab-btn" id="tab-register" onclick="showTab('register')">Register</button>
+    </div>
+
+    <!-- Login form -->
+    <div id="login-section">
+      <label for="login-username">Username</label>
+      <input id="login-username" type="text" placeholder="your_username" autocomplete="username" />
+
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password" />
+
+      <button class="btn" id="login-btn" onclick="doLogin()">Login</button>
+    </div>
+
+    <!-- Register form -->
+    <div id="register-section">
+      <label for="reg-username">Username</label>
+      <input id="reg-username" type="text" placeholder="choose_a_username" autocomplete="username" />
+
+      <label for="reg-password">Password</label>
+      <input id="reg-password" type="password" placeholder="••••••••" autocomplete="new-password" />
+
+      <label for="reg-year">Year of Study (optional)</label>
+      <input id="reg-year" type="text" placeholder="e.g. 3rd year" />
+
+      <button class="btn" id="register-btn" onclick="doRegister()">Create Account</button>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+  </div>
+
+  <script>
+    // Redirect if already logged in
+    const token = localStorage.getItem('edmentor_token');
+    if (token) window.location.href = '/';
+
+    function showTab(tab) {
+      const isLogin = tab === 'login';
+      document.getElementById('login-section').style.display    = isLogin ? 'block' : 'none';
+      document.getElementById('register-section').style.display = isLogin ? 'none'  : 'block';
+      document.getElementById('tab-login').classList.toggle('active', isLogin);
+      document.getElementById('tab-register').classList.toggle('active', !isLogin);
+      document.getElementById('form-title').textContent    = isLogin ? 'Welcome back' : 'Create account';
+      document.getElementById('form-subtitle').textContent = isLogin
+        ? 'Login to see your learning dashboard.'
+        : 'Join EduMentor and start tracking your progress.';
+      hideError();
+    }
+
+    // Allow Enter key to submit
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const loginVisible = document.getElementById('login-section').style.display !== 'none';
+      if (loginVisible) doLogin();
+      else doRegister();
+    });
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.classList.add('show');
+    }
+
+    function hideError() {
+      document.getElementById('error-msg').classList.remove('show');
+    }
+
+    function setLoading(btnId, loading) {
+      const btn = document.getElementById(btnId);
+      if (loading) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-spinner"></span>Please wait…';
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = btnId === 'login-btn' ? 'Login' : 'Create Account';
+      }
+    }
+
+    async function doLogin() {
+      hideError();
+      const username = document.getElementById('login-username').value.trim();
+      const password = document.getElementById('login-password').value;
+      if (!username || !password) { showError('Please enter both username and password.'); return; }
+      setLoading('login-btn', true);
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) { showError(data.detail || 'Invalid credentials.'); return; }
+        localStorage.setItem('edmentor_token', data.access_token);
+        window.location.href = '/';
+      } catch (err) {
+        showError('Network error. Is the server running?');
+      } finally {
+        setLoading('login-btn', false);
+      }
+    }
+
+    async function doRegister() {
+      hideError();
+      const username = document.getElementById('reg-username').value.trim();
+      const password = document.getElementById('reg-password').value;
+      const year     = document.getElementById('reg-year').value.trim() || null;
+      if (!username || !password) { showError('Username and password are required.'); return; }
+      setLoading('register-btn', true);
+      try {
+        const res = await fetch('/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, year }),
+        });
+        const data = await res.json();
+        if (!res.ok) { showError(data.detail || 'Registration failed.'); return; }
+        // Auto-login after register
+        const loginRes = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const loginData = await loginRes.json();
+        if (loginRes.ok) {
+          localStorage.setItem('edmentor_token', loginData.access_token);
+          window.location.href = '/';
+        } else {
+          showError('Account created! Please login.');
+          showTab('login');
+        }
+      } catch (err) {
+        showError('Network error. Is the server running?');
+      } finally {
+        setLoading('register-btn', false);
+      }
+    }
+  </script>
+</body>
+</html>

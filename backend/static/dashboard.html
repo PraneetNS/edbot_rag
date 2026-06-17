@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduMentor — My Dashboard</title>
+  <meta name="description" content="Your personalised EduMentor learning dashboard — track topics, review answers, spot weak areas, and get mentor insights." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f1a;
+      --surface:   #161929;
+      --surface2:  #1d2035;
+      --border:    #252840;
+      --accent:    #7c6ff7;
+      --accent2:   #5ef6ff;
+      --text:      #e8eaf6;
+      --muted:     #8b90b8;
+      --radius:    16px;
+      --radius-sm: 10px;
+
+      /* Topic colours */
+      --dsa:     #a78bfa;
+      --placement: #2dd4bf;
+      --internship:#fbbf24;
+      --resume:   #60a5fa;
+      --career:   #34d399;
+      --mindset:  #f87171;
+      --higher:   #e879f9;
+      --cs:       #fb923c;
+      --general:  #94a3b8;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── NAV ─────────────────────────────────────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 32px;
+      background: rgba(13,15,26,.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo { display: flex; align-items: center; gap: 10px; }
+    .nav-logo-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .nav-logo-text {
+      font-size: 18px; font-weight: 700;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+
+    .nav-right { display: flex; align-items: center; gap: 14px; }
+
+    #nav-user {
+      font-size: 13px; color: var(--muted);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 12px;
+    }
+
+    #nav-user strong { color: var(--text); }
+
+    .btn-logout {
+      padding: 7px 16px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all .2s;
+    }
+    .btn-logout:hover { border-color: #f87171; color: #f87171; }
+
+    .btn-chat {
+      padding: 7px 16px;
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all .2s;
+    }
+    .btn-chat:hover { background: #6b5ee5; border-color: #6b5ee5; transform: translateY(-1px); }
+
+    /* ── MAIN LAYOUT ─────────────────────────────────────────────────── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+
+    .page-header {
+      margin-bottom: 36px;
+      animation: fadeUp .4s ease both;
+    }
+
+    .page-header h1 { font-size: 28px; font-weight: 800; }
+    .page-header p  { color: var(--muted); margin-top: 6px; font-size: 15px; }
+
+    .stat-chips {
+      display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;
+    }
+
+    .chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 14px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .chip strong { color: var(--text); }
+
+    /* ── SECTIONS ────────────────────────────────────────────────────── */
+    section {
+      margin-bottom: 40px;
+      animation: fadeUp .5s ease both;
+    }
+
+    section:nth-child(2) { animation-delay:.05s; }
+    section:nth-child(3) { animation-delay:.1s; }
+    section:nth-child(4) { animation-delay:.15s; }
+    section:nth-child(5) { animation-delay:.2s; }
+
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(16px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+
+    .section-title {
+      font-size: 16px; font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    .section-title::after {
+      content: ''; flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── TOPIC PILLS ─────────────────────────────────────────────────── */
+    .topic-grid { display: flex; flex-direction: column; gap: 10px; }
+
+    .topic-row {
+      display: flex; align-items: center; gap: 12px;
+    }
+
+    .topic-label {
+      width: 120px; flex-shrink: 0;
+      font-size: 13px; font-weight: 500;
+      text-transform: capitalize;
+      color: var(--text);
+    }
+
+    .topic-bar-wrap {
+      flex: 1;
+      background: rgba(255,255,255,.04);
+      border-radius: 6px;
+      height: 22px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .topic-bar {
+      height: 100%;
+      border-radius: 6px;
+      min-width: 4px;
+      transition: width .6s cubic-bezier(.4,0,.2,1);
+    }
+
+    .topic-count {
+      width: 30px; flex-shrink: 0;
+      font-size: 13px; font-weight: 600;
+      text-align: right;
+      color: var(--muted);
+    }
+
+    /* ── Q&A FEED ────────────────────────────────────────────────────── */
+    .feed { display: flex; flex-direction: column; gap: 12px; }
+
+    .turn-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px 18px;
+      transition: border-color .2s, box-shadow .2s;
+      cursor: default;
+    }
+
+    .turn-card:hover {
+      border-color: rgba(124,111,247,.3);
+      box-shadow: 0 4px 20px rgba(0,0,0,.2);
+    }
+
+    .turn-meta {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+
+    .turn-time {
+      font-size: 11px; color: var(--muted);
+      margin-left: auto;
+    }
+
+    .topic-badge {
+      padding: 2px 9px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .turn-q {
+      font-size: 14px; font-weight: 500;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    .turn-a {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.55;
+      max-height: 60px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .turn-a.expanded { max-height: none; }
+
+    .expand-btn {
+      font-size: 11px;
+      color: var(--accent);
+      cursor: pointer;
+      background: none; border: none;
+      font-family: inherit;
+      padding: 4px 0 0;
+      display: block;
+    }
+
+    /* ── WEAK AREAS ──────────────────────────────────────────────────── */
+    .gaps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .gap-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 20px;
+      transition: border-color .2s;
+    }
+
+    .gap-card:hover { border-color: rgba(251,191,36,.3); }
+
+    .gap-topic {
+      font-size: 15px; font-weight: 700;
+      text-transform: capitalize;
+      margin-bottom: 8px;
+    }
+
+    .gap-stats {
+      display: flex; gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .gap-stat {
+      display: flex; flex-direction: column;
+      gap: 2px;
+    }
+
+    .gap-stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing:.05em; }
+    .gap-stat-val   { font-size: 18px; font-weight: 700; }
+
+    .gap-example {
+      font-size: 12px; color: var(--muted);
+      font-style: italic;
+      border-left: 2px solid var(--border);
+      padding-left: 8px;
+      line-height: 1.5;
+    }
+
+    /* ── INSIGHTS ────────────────────────────────────────────────────── */
+    .insights-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 640px) {
+      .insights-grid { grid-template-columns: 1fr; }
+    }
+
+    .insight-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 18px 20px;
+    }
+
+    .insight-label {
+      font-size: 11px; font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      margin-bottom: 8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+
+    .insight-text {
+      font-size: 14px; line-height: 1.6; color: var(--text);
+    }
+
+    /* ── LOADING / EMPTY ─────────────────────────────────────────────── */
+    .loading-ring {
+      display: inline-block;
+      width: 32px; height: 32px;
+      border: 3px solid rgba(124,111,247,.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .center-block {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px;
+      padding: 40px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .empty-text { color: var(--muted); font-size: 14px; text-align: center; padding: 20px; }
+  </style>
+</head>
+<body>
+
+<!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
+<nav>
+  <div class="nav-logo">
+    <div class="nav-logo-icon">🎓</div>
+    <span class="nav-logo-text">EduMentor</span>
+  </div>
+  <div class="nav-right">
+    <div id="nav-user"><strong id="nav-name">…</strong></div>
+    <button class="btn-chat" onclick="goToChat()">💬 Back to Chat</button>
+    <button class="btn-logout" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<!-- ── MAIN ─────────────────────────────────────────────────────────────────── -->
+<main>
+  <!-- Loading spinner while data fetches -->
+  <div id="loading-view" class="center-block" style="min-height:60vh;">
+    <div class="loading-ring"></div>
+    <span>Loading your dashboard…</span>
+  </div>
+
+  <!-- Dashboard content (hidden until data loaded) -->
+  <div id="dashboard-view" style="display:none;">
+
+    <!-- SECTION 1 — Header -->
+    <div class="page-header">
+      <h1 id="header-name">Hi, Student 👋</h1>
+      <p id="header-sub">Your learning snapshot</p>
+      <div class="stat-chips" id="stat-chips"></div>
+    </div>
+
+    <!-- SECTION 2 — Topic Breakdown -->
+    <section id="section-topics">
+      <div class="section-title">📊 Topic Breakdown</div>
+      <div class="topic-grid" id="topic-grid">
+        <div class="empty-text">No data yet — start asking questions!</div>
+      </div>
+    </section>
+
+    <!-- SECTION 3 — Recent Q&A -->
+    <section id="section-feed">
+      <div class="section-title">💬 Recent Q&A</div>
+      <div class="feed" id="feed">
+        <div class="empty-text">No questions yet.</div>
+      </div>
+    </section>
+
+    <!-- SECTION 4 — Weak Areas -->
+    <section id="section-gaps">
+      <div class="section-title">⚠️ Weak Areas</div>
+      <div class="gaps-grid" id="gaps-grid">
+        <div class="empty-text">Not enough data yet.</div>
+      </div>
+    </section>
+
+    <!-- SECTION 5 — Mentor Insights -->
+    <section id="section-insights">
+      <div class="section-title">💡 Mentor Insights</div>
+      <div class="insights-grid" id="insights-grid">
+        <div class="empty-text">Not enough data yet.</div>
+      </div>
+    </section>
+
+  </div><!-- /dashboard-view -->
+</main>
+
+<script>
+/* ── Constants ─────────────────────────────────────────────────────────────── */
+const TOPIC_COLORS = {
+  dsa:           { bg: 'rgba(167,139,250,.15)', text: '#a78bfa', bar: '#a78bfa' },
+  placement:     { bg: 'rgba(45,212,191,.15)',  text: '#2dd4bf', bar: '#2dd4bf' },
+  internship:    { bg: 'rgba(251,191,36,.15)',  text: '#fbbf24', bar: '#fbbf24' },
+  resume:        { bg: 'rgba(96,165,250,.15)',  text: '#60a5fa', bar: '#60a5fa' },
+  career:        { bg: 'rgba(52,211,153,.15)',  text: '#34d399', bar: '#34d399' },
+  mindset:       { bg: 'rgba(248,113,113,.15)', text: '#f87171', bar: '#f87171' },
+  higher_studies:{ bg: 'rgba(232,121,249,.15)', text: '#e879f9', bar: '#e879f9' },
+  cs_concepts:   { bg: 'rgba(251,146,60,.15)',  text: '#fb923c', bar: '#fb923c' },
+  general:       { bg: 'rgba(148,163,184,.1)',  text: '#94a3b8', bar: '#94a3b8' },
+};
+
+const INSIGHT_ICONS = {
+  focus_recommendation: '🎯',
+  consistency_signal:   '📅',
+  strongest_topic:      '🏆',
+  weakest_topic:        '📉',
+  session_pattern:      '⏱️',
+};
+
+const INSIGHT_LABELS = {
+  focus_recommendation: 'Focus',
+  consistency_signal:   'Consistency',
+  strongest_topic:      'Strongest Topic',
+  weakest_topic:        'Weakest Topic',
+  session_pattern:      'Session Pattern',
+};
+
+/* ── Auth state ─────────────────────────────────────────────────────────────── */
+let token     = localStorage.getItem('edmentor_token');
+let studentId = null;
+let username  = null;
+
+async function init() {
+  if (!token) { window.location.href = '/login.html'; return; }
+
+  // Validate token & get identity
+  try {
+    const res = await apiFetch('/auth/me');
+    if (!res.ok) { clearAndRedirect(); return; }
+    const me = await res.json();
+    studentId = me.student_id;
+    username  = me.username;
+
+    document.getElementById('nav-name').textContent = username;
+  } catch {
+    clearAndRedirect(); return;
+  }
+
+  // Load all data in parallel
+  try {
+    const [stats, timeline, gaps, insights] = await Promise.all([
+      apiFetch(`/dashboard/${studentId}/stats`).then(r => r.json()),
+      apiFetch(`/dashboard/${studentId}/timeline?limit=20`).then(r => r.json()),
+      apiFetch(`/dashboard/${studentId}/gaps`).then(r => r.json()),
+      apiFetch(`/dashboard/${studentId}/insights`).then(r => r.json()),
+    ]);
+
+    renderHeader(stats);
+    renderTopics(stats.topic_breakdown || {});
+    renderFeed(timeline);
+    renderGaps(gaps);
+    renderInsights(insights);
+
+    document.getElementById('loading-view').style.display  = 'none';
+    document.getElementById('dashboard-view').style.display = 'block';
+  } catch (err) {
+    document.getElementById('loading-view').innerHTML =
+      `<div class="empty-text" style="color:#f87171;">Failed to load dashboard data.<br>${err.message}</div>`;
+  }
+}
+
+function apiFetch(path) {
+  return fetch(path, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+function clearAndRedirect() {
+  localStorage.removeItem('edmentor_token');
+  window.location.href = '/login.html';
+}
+
+function logout() {
+  clearAndRedirect();
+}
+
+function goToChat() {
+  window.location.href = '/';
+}
+
+/* ── Render: Header ─────────────────────────────────────────────────────────── */
+function renderHeader(stats) {
+  document.getElementById('header-name').textContent = `Hi, ${username} 👋`;
+  const year = stats.year || '';
+  document.getElementById('header-sub').textContent =
+    year ? `${year} · Your learning snapshot` : 'Your learning snapshot';
+
+  const chips = document.getElementById('stat-chips');
+  const items = [
+    { label: 'Sessions',   val: stats.total_sessions   || 0 },
+    { label: 'Questions',  val: stats.total_questions  || 0 },
+    { label: 'Active days',val: stats.active_days      || 0 },
+    { label: 'Avg latency',val: stats.avg_total_latency_ms
+        ? `${Math.round(stats.avg_total_latency_ms)}ms` : '—' },
+  ];
+  chips.innerHTML = items.map(i =>
+    `<div class="chip"><strong>${i.val}</strong> ${i.label}</div>`
+  ).join('');
+}
+
+/* ── Render: Topics ─────────────────────────────────────────────────────────── */
+function renderTopics(breakdown) {
+  const grid = document.getElementById('topic-grid');
+  const entries = Object.entries(breakdown).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) { grid.innerHTML = '<div class="empty-text">No topics yet.</div>'; return; }
+
+  const max = entries[0][1];
+  grid.innerHTML = entries.map(([topic, count]) => {
+    const c = TOPIC_COLORS[topic] || TOPIC_COLORS.general;
+    const pct = Math.max(4, Math.round((count / max) * 100));
+    return `
+      <div class="topic-row">
+        <div class="topic-label">${topic.replace('_',' ')}</div>
+        <div class="topic-bar-wrap">
+          <div class="topic-bar" style="width:${pct}%; background:${c.bar}; opacity:.85;"></div>
+        </div>
+        <div class="topic-count">${count}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ── Render: Feed ───────────────────────────────────────────────────────────── */
+function renderFeed(turns) {
+  const feed = document.getElementById('feed');
+  if (!turns.length) { feed.innerHTML = '<div class="empty-text">No questions yet.</div>'; return; }
+
+  feed.innerHTML = turns.map((t, i) => {
+    const c = TOPIC_COLORS[t.topic] || TOPIC_COLORS.general;
+    const ts = new Date(t.timestamp).toLocaleString('en-IN', { dateStyle:'medium', timeStyle:'short' });
+    const answerSafe = (t.response_text || '').replace(/</g,'&lt;');
+    const guardTag   = t.guard_fired
+      ? `<span class="topic-badge" style="background:rgba(248,113,113,.15);color:#f87171;">${t.guard_fired}</span>`
+      : '';
+    const vagueBadge = t.is_vague
+      ? `<span class="topic-badge" style="background:rgba(251,191,36,.12);color:#fbbf24;">vague</span>`
+      : '';
+    return `
+      <div class="turn-card">
+        <div class="turn-meta">
+          <span class="topic-badge" style="background:${c.bg};color:${c.text};">
+            ${(t.topic||'general').replace('_',' ')}
+          </span>
+          ${guardTag}${vagueBadge}
+          <span class="turn-time">${ts}</span>
+        </div>
+        <div class="turn-q">${(t.query_text||'').replace(/</g,'&lt;')}</div>
+        <div class="turn-a" id="ans-${i}">${answerSafe}</div>
+        ${answerSafe.length > 120
+          ? `<button class="expand-btn" onclick="toggleExpand(${i}, this)">Show more ▾</button>`
+          : ''
+        }
+      </div>`;
+  }).join('');
+}
+
+function toggleExpand(i, btn) {
+  const el = document.getElementById(`ans-${i}`);
+  el.classList.toggle('expanded');
+  btn.textContent = el.classList.contains('expanded') ? 'Show less ▴' : 'Show more ▾';
+}
+
+/* ── Render: Weak Areas ─────────────────────────────────────────────────────── */
+function renderGaps(gaps) {
+  const grid = document.getElementById('gaps-grid');
+  const top3 = gaps.slice(0, 3);
+  if (!top3.length) {
+    grid.innerHTML = '<div class="empty-text">No notable weak areas yet — keep asking questions!</div>';
+    return;
+  }
+
+  grid.innerHTML = top3.map(g => {
+    const c = TOPIC_COLORS[g.topic] || TOPIC_COLORS.general;
+    const rr = Math.round((g.repeat_rate || 0) * 100);
+    const ex = (g.example_questions || []).slice(0, 1)[0] || '';
+    return `
+      <div class="gap-card">
+        <div class="gap-topic" style="color:${c.text};">${(g.topic||'').replace('_',' ')}</div>
+        <div class="gap-stats">
+          <div class="gap-stat">
+            <span class="gap-stat-label">Questions</span>
+            <span class="gap-stat-val" style="color:${c.text};">${g.question_count}</span>
+          </div>
+          <div class="gap-stat">
+            <span class="gap-stat-label">Repeat rate</span>
+            <span class="gap-stat-val">${rr}%</span>
+          </div>
+        </div>
+        ${ex ? `<div class="gap-example">"${ex.replace(/</g,'&lt;')}"</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+/* ── Render: Insights ───────────────────────────────────────────────────────── */
+function renderInsights(ins) {
+  const grid = document.getElementById('insights-grid');
+  const keys = ['focus_recommendation','consistency_signal','strongest_topic','weakest_topic','session_pattern'];
+  const cards = keys.filter(k => ins[k] && ins[k] !== 'None yet').map(k => `
+    <div class="insight-card">
+      <div class="insight-label">
+        ${INSIGHT_ICONS[k] || '📌'} ${INSIGHT_LABELS[k] || k}
+      </div>
+      <div class="insight-text">${ins[k].replace(/</g,'&lt;')}</div>
+    </div>`);
+
+  grid.innerHTML = cards.length ? cards.join('') : '<div class="empty-text">Ask more questions to unlock insights.</div>';
+}
+
+/* ── Boot ───────────────────────────────────────────────────────────────────── */
+init();
+</script>
+</body>
+</html>
