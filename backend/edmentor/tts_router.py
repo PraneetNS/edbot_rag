@@ -61,8 +61,8 @@ def _load_kokoro():
         _kokoro_error = str(e)
         logger.warning(f"[TTS] Kokoro load error: {e}")
 
-# Load at import time — runs once when the FastAPI app starts
-_load_kokoro()
+# Load deferred to FastAPI startup event handler to ensure warmup order
+# _load_kokoro()
 
 
 def _try_kokoro(text: str, voice: str, speed: float):
