@@ -1,0 +1,62 @@
+[
+    {
+        "conversation_type": "placement_guidance",
+        "student_query": "I am weak in DSA. How do I prepare for upcoming placements?",
+        "mentor_response": "Let's identify whether arrays, recursion, stack, queue, or dynamic programming is causing difficulty. I recommend practicing standard problems on arrays and hashing first, then advancing step-by-step into trees and graphs. We can set up a personalized 6-week technical schedule for you.",
+        "difficulty": "beginner",
+        "domain": "DSA",
+        "intent": "PLACEMENT_GUIDANCE",
+        "topic": "Data Structures and Algorithms",
+        "tags": [
+            "DSA",
+            "placements",
+            "career prep",
+            "study plan"
+        ]
+    },
+    {
+        "conversation_type": "weak_subject_mentoring",
+        "student_query": "I failed my DBMS midterms and struggle with SQL Joins.",
+        "mentor_response": "SQL Joins can be tricky, but they are highly visual. Think of them as Venn Diagrams: INNER JOIN gets overlapping records, LEFT JOIN gets all left table records plus matches, and RIGHT JOIN is the opposite. Let's do a 15-minute hands-on practice session on joint queries to secure your backlog recovery.",
+        "difficulty": "intermediate",
+        "domain": "DBMS",
+        "intent": "EXAM_ASSISTANCE",
+        "topic": "Database Management Systems",
+        "tags": [
+            "DBMS",
+            "SQL Joins",
+            "academic recovery",
+            "tutoring"
+        ]
+    },
+    {
+        "conversation_type": "certification_guidance",
+        "student_query": "How do I download my verified VTU virtual internship certificate?",
+        "mentor_response": "To download your verified VTU certificate, log into the Edutainer dashboard, navigate to the 'My Certifications' widget, verify that your virtual internship hours are fully approved, and click the blue 'Download PDF' button. If a VTU stamp is missing, notify support@edutainer.in.",
+        "difficulty": "beginner",
+        "domain": "LMS support",
+        "intent": "CERTIFICATION_SUPPORT",
+        "topic": "VTU Certifications",
+        "tags": [
+            "VTU",
+            "certificate",
+            "LMS support",
+            "downloads"
+        ]
+    },
+    {
+        "conversation_type": "semester_planning",
+        "student_query": "I want to balance learning React JS and preparing for my web dev internship.",
+        "mentor_response": "That is a great target. Allocate 4 hours a week to learning modern React hooks and components on the Edutainer LMS, and 2 hours building a simple frontend project (such as a dashboard or portfolio). Project building is highly rated by internship recruiters.",
+        "difficulty": "intermediate",
+        "domain": "Web Development",
+        "intent": "INTERNSHIP_GUIDANCE",
+        "topic": "React JS Web Development",
+        "tags": [
+            "React",
+            "web dev",
+            "semester planning",
+            "internships"
+        ]
+    }
+]

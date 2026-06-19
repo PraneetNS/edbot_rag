@@ -1,0 +1,50 @@
+[
+    {
+        "intent": "certificate_issue",
+        "examples": [
+            "Certificate not visible",
+            "I didn't receive my VTU internship certificate",
+            "Where is my verified credentials badge?"
+        ],
+        "workflow": [
+            "Verify all course modules are marked as 100% completed",
+            "Check that final assessments are graded and passed successfully",
+            "Click 'Refresh Dashboard' in your profile settings",
+            "If still missing, escalate the request to support@edutainer.in with your user ID"
+        ],
+        "category": "LMS support",
+        "domain": "LMS workflow",
+        "difficulty": "beginner",
+        "topic": "Certificate Troubleshooting",
+        "tags": [
+            "workflows",
+            "LMS",
+            "credentials",
+            "support"
+        ]
+    },
+    {
+        "intent": "lms_login_issue",
+        "examples": [
+            "LMS login failing",
+            "Cannot access my course dashboard",
+            "Password reset link not working"
+        ],
+        "workflow": [
+            "Clear browser cookies and local storage",
+            "Navigate to the login portal and click 'Forgot Password'",
+            "Check spam/junk folder for the verified reset link",
+            "Contact technical team support@edutainer.in if account remains locked out"
+        ],
+        "category": "LMS support",
+        "domain": "LMS workflow",
+        "difficulty": "beginner",
+        "topic": "LMS Portal Authentication",
+        "tags": [
+            "workflows",
+            "LMS",
+            "login",
+            "password reset"
+        ]
+    }
+]

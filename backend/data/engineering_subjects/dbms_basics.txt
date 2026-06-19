@@ -1,0 +1,121 @@
+Source URL: https://www.geeksforgeeks.org/dbms/
+A Database Management System (DBMS) is software used to manage data from a database. It acts as an interface between the database and end users or applications, ensuring data is consistently organised, easily accessible, and secure.
+- A database is a structured collection of data that is stored in an electronic device. The data can be text, video, image, or any other format.
+- A relational database stores data in the form of tables, and a NoSQL database stores data in the form of key-value pairs.
+- A DBMS is a software that allows to create, update, and retrieval of data in an organised way. It also provides security to the database.
+- Examples of relational DBMS are MySQL, Oracle, Microsoft SQL Server, PostgreSQL, and Snowflake.
+- Examples of NoSQL DBMS are MongoDB, Cassandra, DynamoDB, and Redis.
+Introduction
+Understand the basics of DBMS, explore how it works, and learn about different database architectures used in real-world systems.
+Entity Relationship Model
+It is a conceptual model for designing a databases to represent real-world data using entities, attributes, and relationships.
+- ER Model
+- Enhanced ER Model
+- Minimization of ER Diagram
+- Generalization, Specialization and Aggregation
+- Recursive Relationships
+Relational Model and Functional Dependencies
+Provides a structured way to organize data into tables and how queries are expressed mathematically and logically to retrieve data from relational databases.
+- Relational Model
+- Keys (Candidate, Super, Primary, Alternate and Foreign)
+- Functional Dependency
+- Attribute Closure
+- Equivalence of Functional Dependencies
+- Canonical Cover
+- Anomalies in Relational Model
+- Mapping from ER Model to Relational Model
+- Strategies for Schema design
+- Schema Integration
+- Quiz: ER and Relational Model
+Normalization
+Important process in database design that helps improve the database's efficiency, consistency, and accuracy.
+- Introduction
+- Normal Forms
+- The Problem of redundancy in Database
+- Dependency Preserving Decomposition
+- Lossless Join Decomposition
+- How to find the Highest Normal Form of a Relation
+- Domain Key normal form
+- Denormalization in Databases
+- Data Replication
+- Quiz: Normal Forms
+Relational Algebra and Calculus
+Formal query languages used in DBMS to retrieve and manipulate data from relational databases.
+- Introduction
+- Basic Operators
+- Extended Operators
+- Inner Join vs Outer Join
+- Join operation Vs nested query
+- Tuple Relational Calculus
+- Row oriented vs. column oriented data stores
+Transactions and Concurrency Control
+Ensure reliable execution of database operations and manages simultaneous access without conflicts.
+- Introduction
+- ACID Properties
+- Lock Based Protocol
+- Graph Based Protocol
+- Multiple Granularity Locking
+- Timestamp Ordering Protocols
+- Thomas Write Rule
+- Timestamp and Deadlock Prevention Schemes
+- Log based recovery
+- Types of OLAP Systems
+- Quiz: Transactions and concurrency control
+File Organization, Indexing, B and B+ Trees
+Method of storing data records in a file so they can be accessed efficiently. It determines how data is arranged, stored, and retrieved from physical storage.
+- File Organization
+- Indexing in Databases
+- SQL queries on clustered and non-clustered Indexes
+- B-Tree
+- B+ Tree
+- Bitmap Indexing
+- Inverted Index
+- Practice questions on B and B+ Trees
+- Quiz: Indexing, B and B+ Trees , File structures
+Advanced Topics
+Concepts focus on improving performance, scalability, security, and data retrieval across modern systems.
+- RAID
+- Distributed Database System
+- Query Optimization
+- Difference between RDBMS and HBase
+- Challenges of database security
+- Data Management issues in Mobile database
+- Future Works in Geographic Information System
+- Web Information Retrieval | Vector Space Model
+Data Warehouse and Data Mining
+Store large volumes of historical data and discover useful patterns from it.
+- Data Warehousing
+- Data Warehouse Architecture
+- Data Mining
+- Dimensional Data Modeling
+- Data Marts
+- Apache HBase
+- Apache Hive
+- Architecture and Working of Hive
+SQL Tutorial & Interview Questions
+SQL is the standard language used to store, retrieve, and manipulate data in relational databases.
+- SQL Tutorial
+- Quiz on SQL
+- SQL Interview Questions
+- PostgreSQL Interview Questions
+- PL/SQL Interview Questions
+- DBMS interview questions
+Miscellaneous Topics
+Help build a deeper understanding of how databases interact with users, applications, and internal structures.
+- DBMS Interfaces
+- Categories of DBMS Users
+- Data Abstraction and Data Independence
+- Database Objects
+- Impedance Mismatch
+DBMS practices questions
+- Database Management Systems | Set 1
+- Database Management Systems | Set 2
+- Database Management Systems | Set 3
+- Database Management Systems | Set 4
+- Database Management Systems | Set 5
+- Database Management Systems | Set 6
+- Database Management Systems | Set 7
+- Database Management Systems | Set 8
+- Database Management Systems | Set 9
+- Database Management Systems | Set 10
+- Database Management Systems | Set 11

@@ -52,7 +52,13 @@ Make sure you are using Python 3.10+ and install requirements:
 pip install -r backend/requirements.txt
 ```
 
-### 4. Build/Verify Indices
+### 4. Download Model Binaries (Text-to-Speech)
+The Text-to-Speech feature requires the Kokoro-ONNX model and voice weights. Run the download helper script to fetch these files (approx. 350 MB total):
+```bash
+python backend/download_models.py
+```
+
+### 5. Build/Verify Indices
 Ensure ChromaDB is populated by running the indexing build script or checking status with the diagnostics dashboard:
 ```bash
 python backend/main.py

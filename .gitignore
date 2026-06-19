@@ -1,42 +1,38 @@
+# Virtual environment and python compiler cache
 .venv/
 __pycache__/
 *.pyc
-backend/chroma_store/
 backend/__pycache__/
 backend/rag/__pycache__/
 backend/scraper/__pycache__/
 backend/scraper/output/
+backend/edmentor/__pycache__/
+backend/rag/database/__pycache__/
+backend/rag/indexing/__pycache__/
+backend/rag/loaders/__pycache__/
+backend/rag/retrieval/__pycache__/
+backend/tests/__pycache__/
+backend/demo/__pycache__/
+backend/tts/__pycache__/
+ai_core/__pycache__/
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# Generated data and databases
-backend/data/
-backend/vectordb/
-basic_training_dataset.json
-chroma.sqlite3
-chromadb_backup.zip
-chunks (1).json
-chunks.json
-embeddings.npy
-final_dataset.json
-
-# Local databases and large datasets
-chroma_db/
-*.jsonl
-*.log
-
-# Local environment variables
-.env
-backend/.env
-test_audio.mp3
-backend/test_audio.mp3
-
-# Local model binaries
+# Large Model Binaries (downloaded via download_models.py)
 backend/*.onnx
 backend/*.bin
 
-# Local databases
-edumentor_chroma/
+# Local environment configs (use .env.example instead)
+.env
+backend/.env
 
-# Generated documents
-rag_docs.json
+# Temporary and log files
+*.log
+backend/logs/
+test_audio.mp3
+backend/test_audio.mp3
+
+# Runtime session profiles
+backend/data/profiles/
